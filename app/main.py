@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from contextlib import asynccontextmanager
 import uvicorn
 
 from app.core.config import settings
@@ -8,18 +9,23 @@ from app.api.main_router import api_router
 from app.db.session import engine
 from app.db.models import Base
 
-# Create tables for demonstration purposes. In a real app, use Alembic migrations.
-try:
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-        conn.commit()
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"Warning: Could not connect to the database to create tables. {e}")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create tables for demonstration purposes. In a real app, use Alembic migrations.
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            conn.commit()
+        Base.metadata.create_all(bind=engine)
+        print("Database tables created/verified successfully on startup.")
+    except Exception as e:
+        print(f"Warning: Could not connect to the database to create tables. {e}")
+    yield
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
 )
 
 # Set up CORS

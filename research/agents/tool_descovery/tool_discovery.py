@@ -62,7 +62,9 @@ class ToolDiscoveryWorkflow:
         self.embeddings = OpenAIEmbeddings(
             openai_api_base="https://openrouter.ai/api/v1",
             openai_api_key=api_key,
-            model=emb_model
+            model=emb_model,
+            check_embedding_ctx_length=False,
+            tiktoken_enabled=False
         )
 
         # Generate the custom graph
@@ -143,10 +145,16 @@ class ToolDiscoveryWorkflow:
         seen_titles = set()
         
         try:
+            print(f"    [DB] Queries to search: {queries}")
             for query in queries:
+                print(f"    [DB] Processing query: '{query}'")
                 query_vector = self.embeddings.embed_query(query)
+                print(f"    [DB] Generated embedding vector of length {len(query_vector)}")
+                
                 # Get top 2 closest matches per query
+                print(f"    [DB] Querying PostgreSQL pgvector for top 2 matches...")
                 tools = db.query(AITool).order_by(AITool.vector_data.cosine_distance(query_vector)).limit(2).all()
+                print(f"    [DB] Found {len(tools)} tools for query '{query}'")
                 
                 if tools:
                     for t in tools:
@@ -157,7 +165,9 @@ class ToolDiscoveryWorkflow:
                                 "description": t.description,
                                 "argument": t.argument
                             })
-                            print(f"    Found local tool: {t.tool_title}")
+                            print(f"    [DB] -> Added tool to results: {t.tool_title}")
+                        else:
+                            print(f"    [DB] -> Skipped tool (already seen): {t.tool_title}")
         finally:
             db.close()
             
@@ -205,10 +215,10 @@ class ToolDiscoveryWorkflow:
             mock_web_tools.append({
                 "tool_title": f"WebTool_{capability.replace(' ', '_').lower()}",
                 "description": f"An excellent tool found on the web that provides: {capability}",
-                "argument": {"search_query": {"type": "string", "description": "The thing to search"}},
-                "api_url": f"https://mock-api.com/v1/{capability.replace(' ', '')}",
+                "argument": {"max_length": {"type": "integer", "description": "Maximum length of the cat fact"}},
+                "api_url": "https://catfact.ninja/fact",
                 "http_method": "GET",
-                "headers": {"Authorization": "Bearer MOCK_TOKEN"}
+                "headers": {"Accept": "application/json"}
             })
             
         return {"web_tools_found": mock_web_tools}
@@ -228,12 +238,20 @@ class ToolDiscoveryWorkflow:
                 print(f"    Created runnable tool: {runnable_tool.name}")
                 
                 # 2. Test the runnable tool with mock input
-                test_result = runnable_tool.invoke({"search_query": "test run"})
+                mock_args = {}
+                if wt.get("argument"):
+                    first_key = list(wt["argument"].keys())[0]
+                    mock_args[first_key] = "test run"
+                    
+                test_result = runnable_tool.invoke(mock_args)
                 print(f"    Test Result: {test_result}")
+                
+                if isinstance(test_result, str) and test_result.startswith("Error executing tool:"):
+                    raise Exception(test_result)
                 
                 wt["tested_and_passed"] = True
             except Exception as e:
-                print(f"    Failed to test tool {wt['tool_title']}: {e}")
+                print(f"    Failed to test tool {wt.get('tool_title', 'Unknown')}: {e}")
                 wt["tested_and_passed"] = False
                 
             tested.append(wt)
@@ -256,6 +274,9 @@ class ToolDiscoveryWorkflow:
                         tool_title=tt["tool_title"],
                         description=tt["description"],
                         argument=tt["argument"],
+                        api_url=tt.get("api_url"),
+                        http_method=tt.get("http_method", "GET"),
+                        headers=tt.get("headers", {}),
                         vector_data=vector
                     )
                     db.add(new_tool)

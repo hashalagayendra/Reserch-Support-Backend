@@ -1,9 +1,15 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Table
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, JSON, Table, DateTime
+from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from app.db.session import Base
 
-class Student(Base):
+class TimestampMixin:
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class Student(Base, TimestampMixin):
     """
     Database model representing a Student (Legacy).
     """
@@ -17,7 +23,7 @@ class Student(Base):
     is_active = Column(Boolean, default=True)
 
 
-class ProjectApiKey(Base):
+class ProjectApiKey(Base, TimestampMixin):
     """
     Association Object for the many-to-many relationship between Project and ApiKey.
     Using a class instead of a Table allows you to easily add extra fields in the future
@@ -29,7 +35,7 @@ class ProjectApiKey(Base):
     apikey_id = Column(Integer, ForeignKey("api_keys.id", ondelete="CASCADE"), primary_key=True)
 
 
-class User(Base):
+class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -39,7 +45,7 @@ class User(Base):
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
 
 
-class Project(Base):
+class Project(Base, TimestampMixin):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -51,7 +57,7 @@ class Project(Base):
     ai_tools = relationship("AITool", back_populates="project", cascade="all, delete-orphan")
 
 
-class ApiKey(Base):
+class ApiKey(Base, TimestampMixin):
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -60,7 +66,7 @@ class ApiKey(Base):
     projects = relationship("Project", secondary="project_apikeys", back_populates="api_keys")
 
 
-class AITool(Base):
+class AITool(Base, TimestampMixin):
     __tablename__ = "ai_tools"
 
     id = Column(Integer, primary_key=True, index=True)

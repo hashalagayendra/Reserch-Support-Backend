@@ -4,13 +4,14 @@ class Research:
     openRouterAPIKey:str
     toolDiscoveryModel:str
     toolDiscoveryModelTemperature:float
+    projectApiKey:str
     
 
 
     def __init__(self):
         pass
 
-    def configure(self, openRouterAPIKey: str, toolDiscoveryModel: str, toolDiscoveryModelTemperature: float):
+    def configure(self, openRouterAPIKey: str, toolDiscoveryModel: str, toolDiscoveryModelTemperature: float, projectApiKey: str = None):
 
         """
         Args:-
@@ -33,9 +34,9 @@ class Research:
         self.openRouterAPIKey = openRouterAPIKey.strip()
         self.toolDiscoveryModel = toolDiscoveryModel.strip()
         self.toolDiscoveryModelTemperature = float(toolDiscoveryModelTemperature)
+        self.projectApiKey = projectApiKey.strip() if projectApiKey else None
 
 
-        """create the tool discovery agent"""
         self.tool_discovery_workflow = ToolDiscoveryWorkflow(
             openRouterAPIKey=self.openRouterAPIKey,
             toolDiscoveryModel=self.toolDiscoveryModel,

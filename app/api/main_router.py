@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routers import student, research
+from app.api.routers import student, research, tool_discovery_test
 
 api_router = APIRouter()
 
@@ -15,4 +15,11 @@ api_router.include_router(
     research.router,
     prefix="/research",
     tags=["research"]
+)
+
+# Include the tool discovery test router
+api_router.include_router(
+    tool_discovery_test.router,
+    prefix="/tool-discovery-test",
+    tags=["tool-discovery-test"]
 )
