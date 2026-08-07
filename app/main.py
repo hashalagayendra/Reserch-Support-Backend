@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 import uvicorn
 
 from app.core.config import settings
@@ -9,6 +10,9 @@ from app.db.models import Base
 
 # Create tables for demonstration purposes. In a real app, use Alembic migrations.
 try:
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
 except Exception as e:
     print(f"Warning: Could not connect to the database to create tables. {e}")
