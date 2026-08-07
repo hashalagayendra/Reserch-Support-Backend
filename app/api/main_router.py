@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routers import student
+from app.api.routers import student, research
 
 api_router = APIRouter()
 
@@ -8,4 +8,11 @@ api_router.include_router(
     student.router, 
     prefix="/students", 
     tags=["students"]
+)
+
+# Include the research router
+api_router.include_router(
+    research.router,
+    prefix="/research",
+    tags=["research"]
 )

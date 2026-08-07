@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     # Using a dummy database URL for demonstration purposes
     DATABASE_URL: str = "postgresql://dummy_user:dummy_pass@localhost:5432/dummy_db"
     DUMMY_API_KEY: str = "dummy_secret_key"
+    OPENROUTER_API_KEY: str = ""
+
 
     class Config:
         env_file = ".env"

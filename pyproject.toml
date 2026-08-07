@@ -13,6 +13,10 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "sqlalchemy>=2.0.51",
     "pgvector>=0.2.5",
+    "langchain-openrouter>=0.2.7",
+    "langchain-core>=1.5.3",
+    "langgraph>=1.2.10",
+    "python-dotenv>=1.2.2",
 ]
 
 
