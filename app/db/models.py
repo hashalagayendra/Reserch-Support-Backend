@@ -68,7 +68,10 @@ class AITool(Base):
     tool_title = Column(String, index=True, nullable=False)
     description = Column(String, nullable=True)
     argument = Column(JSON, nullable=True)
-    vector_data = Column(Vector(1536))  # 1536 is standard for OpenAI embeddings
+    api_url = Column(String, nullable=True)
+    http_method = Column(String, nullable=True)
+    headers = Column(JSON, nullable=True)
+    vector_data = Column(Vector(1024))  # 1024 is default for Voyage-4-lite embeddings
 
     project = relationship("Project", back_populates="ai_tools")
 

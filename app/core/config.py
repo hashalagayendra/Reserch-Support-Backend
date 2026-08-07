@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://dummy_user:dummy_pass@localhost:5432/dummy_db"
     DUMMY_API_KEY: str = "dummy_secret_key"
     OPENROUTER_API_KEY: str = ""
+    TOOL_DISCOVERY_MODEL: str = "deepseek/deepseek-v4-flash"
+    TOOL_DISCOVERY_TEMPERATURE: float = 0.8
+    EMBEDDING_MODEL: str = "voyageai/voyage-4-lite"
 
 
     class Config:
