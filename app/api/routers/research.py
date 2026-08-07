@@ -20,7 +20,8 @@ async def run_discovery(request: QueryRequest):
        research_agent.configure(
            openRouterAPIKey=settings.OPENROUTER_API_KEY,
            toolDiscoveryModel=settings.TOOL_DISCOVERY_MODEL,
-           toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE
+           toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE,
+           projectApiKey=settings.PROJECT_API_KEY
        )
        result = await research_agent.run(request.query)
        

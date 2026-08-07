@@ -8,8 +8,6 @@ from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.db.session import SessionLocal
-from app.db.models import AITool
 
 # --- STRUCTURED OUTPUT MODELS ---
 class TaskAnalysis(BaseModel):
@@ -43,8 +41,10 @@ class ToolDiscoveryWorkflow:
         openRouterAPIKey: str = None, 
         toolDiscoveryModel: str = None, 
         toolDiscoveryModelTemperature: float = None,
-        embeddingModel: str = None
+        embeddingModel: str = None,
+        db_client = None
     ):
+        self.db_client = db_client
         # Configuration
         api_key = openRouterAPIKey or settings.OPENROUTER_API_KEY
         model = toolDiscoveryModel or settings.TOOL_DISCOVERY_MODEL
@@ -140,36 +140,38 @@ class ToolDiscoveryWorkflow:
         queries = state.get("search_queries", [])
         print(f"--- [Node: explore_db] Searching DB for queries ---")
         
-        db = SessionLocal()
         found_tools = []
         seen_titles = set()
         
-        try:
-            print(f"    [DB] Queries to search: {queries}")
-            for query in queries:
-                print(f"    [DB] Processing query: '{query}'")
-                query_vector = self.embeddings.embed_query(query)
-                print(f"    [DB] Generated embedding vector of length {len(query_vector)}")
+        print(f"    [DB] Queries to search: {queries}")
+        for query in queries:
+            print(f"    [DB] Processing query: '{query}'")
+            query_vector = self.embeddings.embed_query(query)
+            print(f"    [DB] Generated embedding vector of length {len(query_vector)}")
+            
+            # Get top 2 closest matches per query using db_client
+            print(f"    [DB] Querying API for top 2 matches...")
+            if self.db_client:
+                tools = self.db_client.search_tools(query_vector=query_vector, limit=2)
+            else:
+                print("    [DB] Warning: No db_client provided, skipping DB search.")
+                tools = []
                 
-                # Get top 2 closest matches per query
-                print(f"    [DB] Querying PostgreSQL pgvector for top 2 matches...")
-                tools = db.query(AITool).order_by(AITool.vector_data.cosine_distance(query_vector)).limit(2).all()
-                print(f"    [DB] Found {len(tools)} tools for query '{query}'")
-                
-                if tools:
-                    for t in tools:
-                        if t.tool_title not in seen_titles:
-                            seen_titles.add(t.tool_title)
-                            found_tools.append({
-                                "tool_title": t.tool_title,
-                                "description": t.description,
-                                "argument": t.argument
-                            })
-                            print(f"    [DB] -> Added tool to results: {t.tool_title}")
-                        else:
-                            print(f"    [DB] -> Skipped tool (already seen): {t.tool_title}")
-        finally:
-            db.close()
+            print(f"    [DB] Found {len(tools)} tools for query '{query}'")
+            
+            if tools:
+                for t in tools:
+                    tool_title = t.get("tool_title")
+                    if tool_title not in seen_titles:
+                        seen_titles.add(tool_title)
+                        found_tools.append({
+                            "tool_title": tool_title,
+                            "description": t.get("description"),
+                            "argument": t.get("argument")
+                        })
+                        print(f"    [DB] -> Added tool to results: {tool_title}")
+                    else:
+                        print(f"    [DB] -> Skipped tool (already seen): {tool_title}")
             
         return {"local_tools_found": found_tools}
 
@@ -263,30 +265,32 @@ class ToolDiscoveryWorkflow:
         tested_tools = state.get("tested_tools", [])
         print("--- [Node: store_tool] Caching validated tools to database ---")
         
-        db = SessionLocal()
-        try:
-            for tt in tested_tools:
-                if tt.get("tested_and_passed"):
+        if not self.db_client:
+            print("    [DB] Warning: No db_client provided, skipping DB store.")
+            return {}
+            
+        stored_count = 0
+        for tt in tested_tools:
+            if tt.get("tested_and_passed"):
+                try:
                     vector = self.embeddings.embed_query(tt["description"])
                     # Using hardcoded project_id=1 as a dummy for now
-                    new_tool = AITool(
-                        project_id=1,
-                        tool_title=tt["tool_title"],
-                        description=tt["description"],
-                        argument=tt["argument"],
-                        api_url=tt.get("api_url"),
-                        http_method=tt.get("http_method", "GET"),
-                        headers=tt.get("headers", {}),
-                        vector_data=vector
-                    )
-                    db.add(new_tool)
-            db.commit()
-            print(f"    Successfully saved {len(tested_tools)} tools to DB.")
-        except Exception as e:
-            print(f"    Error storing tool: {e}")
-            db.rollback()
-        finally:
-            db.close()
+                    tool_data = {
+                        "project_id": 1,
+                        "tool_title": tt["tool_title"],
+                        "description": tt["description"],
+                        "argument": tt["argument"],
+                        "api_url": tt.get("api_url"),
+                        "http_method": tt.get("http_method", "GET"),
+                        "headers": tt.get("headers", {}),
+                        "vector_data": vector
+                    }
+                    self.db_client.store_tool(tool_data)
+                    stored_count += 1
+                except Exception as e:
+                    print(f"    Error storing tool {tt.get('tool_title')}: {e}")
+                    
+        print(f"    Successfully saved {stored_count} tools to DB.")
             
         return {}
 

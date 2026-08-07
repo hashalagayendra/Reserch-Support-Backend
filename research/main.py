@@ -1,4 +1,6 @@
 from research.agents.tool_descovery.tool_discovery import ToolDiscoveryWorkflow
+from research.db_operations.main import ToolDBClient
+from app.core.config import settings
 
 class Research:
     openRouterAPIKey:str
@@ -6,7 +8,6 @@ class Research:
     toolDiscoveryModelTemperature:float
     projectApiKey:str
     
-
 
     def __init__(self):
         pass
@@ -36,11 +37,16 @@ class Research:
         self.toolDiscoveryModelTemperature = float(toolDiscoveryModelTemperature)
         self.projectApiKey = projectApiKey.strip() if projectApiKey else None
 
+        # Initialize the DB Client
+        api_key = self.projectApiKey or settings.DUMMY_API_KEY
+        base_url = f"http://127.0.0.1:8000{settings.API_V1_STR}"
+        db_client = ToolDBClient(base_url=base_url, api_key=api_key)
 
         self.tool_discovery_workflow = ToolDiscoveryWorkflow(
             openRouterAPIKey=self.openRouterAPIKey,
             toolDiscoveryModel=self.toolDiscoveryModel,
-            toolDiscoveryModelTemperature=self.toolDiscoveryModelTemperature
+            toolDiscoveryModelTemperature=self.toolDiscoveryModelTemperature,
+            db_client=db_client
         )
 
     async def run(self, query: str):

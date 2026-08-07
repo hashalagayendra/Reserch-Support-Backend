@@ -3,12 +3,19 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
 from research.agents.tool_descovery.tool_discovery import ToolDiscoveryWorkflow
+from research.db_operations.main import ToolDBClient
+from app.core.config import settings
 
 router = APIRouter()
 
+# Initialize the DB Client for testing
+api_key = settings.PROJECT_API_KEY or settings.DUMMY_API_KEY
+base_url = f"http://127.0.0.1:8000{settings.API_V1_STR}"
+test_db_client = ToolDBClient(base_url=base_url, api_key=api_key)
+
 # Initialize workflow for testing individual nodes
 # We can initialize it globally here since we're just testing the pure node functions
-test_workflow = ToolDiscoveryWorkflow()
+test_workflow = ToolDiscoveryWorkflow(db_client=test_db_client)
 
 class ToolDiscoveryStateModel(BaseModel):
     task: str | None = Field(default="Find a tool that gets the current weather in Tokyo.")
