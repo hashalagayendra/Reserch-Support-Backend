@@ -4,7 +4,7 @@ from typing import List
 
 from app.db.session import get_db
 from app.schemas.student import StudentCreate, StudentUpdate, StudentResponse
-from app.services import student as service
+from app.services.student import student_service as service
 
 router = APIRouter()
 
