@@ -55,7 +55,6 @@ class Research:
             query (str): The query to run the tool discovery agent with.
         """
        
-
-        response = await self.tool_discovery_workflow.run(query)
+        response = await self.tool_discovery_workflow.tool_discovery_workflow_run(query)
        
         return response

@@ -1,4 +1,5 @@
 import operator
+import logging
 from typing import TypedDict, Annotated, List, Dict, Any
 
 from langchain_openrouter import ChatOpenRouter
@@ -6,6 +7,8 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 
@@ -22,6 +25,16 @@ class ToolEvaluation(BaseModel):
     missing_capabilities: List[str] = Field(
         description="A list of specific tool capabilities that are still missing to accomplish the task. Empty if is_sufficient is True."
     )
+
+class APIToolDefinition(BaseModel):
+    tool_title: str = Field(description="A short, unique, camelCase or snake_case name for the tool.")
+    description: str = Field(description="A clear description of what the tool does.")
+    argument: Dict[str, Dict[str, Any]] = Field(
+        description="A dictionary of arguments. Each key is the argument name, and the value is another dictionary containing 'type' and 'description'."
+    )
+    api_url: str = Field(description="The full URL for the API endpoint.")
+    http_method: str = Field(description="The HTTP method to use (e.g., 'GET', 'POST').")
+    headers: Dict[str, str] = Field(description="Any required HTTP headers, like Accept or Content-Type.")
 
 # --- STATE DEFINITION ---
 class ToolDiscoveryState(TypedDict):
@@ -206,24 +219,46 @@ class ToolDiscoveryWorkflow:
         return {"is_sufficient": is_sufficient, "missing_capabilities": missing}
 
     def node_web_search(self, state: ToolDiscoveryState):
-        """Simulates searching the web for specifically missing capabilities."""
+        """Searches the web for specifically missing capabilities and extracts an API definition."""
+        from duckduckgo_search import DDGS
+        
         missing = state.get("missing_capabilities", [])
         print(f"--- [Node: web_search] Searching Web for missing capabilities ---")
         
-        mock_web_tools = []
+        web_tools = []
         for capability in missing:
-            print(f"    Mock searching for: {capability}")
-            # MOCK WEB SEARCH: Returning a full tool payload representing a parsed API
-            mock_web_tools.append({
-                "tool_title": f"WebTool_{capability.replace(' ', '_').lower()}",
-                "description": f"An excellent tool found on the web that provides: {capability}",
-                "argument": {"max_length": {"type": "integer", "description": "Maximum length of the cat fact"}},
-                "api_url": "https://catfact.ninja/fact",
-                "http_method": "GET",
-                "headers": {"Accept": "application/json"}
-            })
-            
-        return {"web_tools_found": mock_web_tools}
+            print(f"    Searching for: {capability}")
+            query = f"{capability} free API JSON"
+            try:
+                results = DDGS().text(query, max_results=5)
+                search_text = "\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nURL: {r.get('href')}\n" for r in results])
+                
+                print(f"    Analyzing search results for: {capability}")
+                print(f"    --- Search Results Preview ---\n{search_text[:500]}...\n    ------------------------------")
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", "You are an API extraction assistant. Your job is to extract a runnable, public, preferably free API definition from the given search results that matches the user's capability requirement. Do not hallucinate APIs; only use information from the search results if possible, or fallback to known public APIs that perfectly match the requirement. Always return a valid JSON API definition."),
+                    ("user", "Capability required: {capability}\n\nSearch Results:\n{search_results}")
+                ])
+                
+                chain = prompt | self.llm.with_structured_output(APIToolDefinition)
+                api_def = chain.invoke({"capability": capability, "search_results": search_text})
+                
+                print(f"    Successfully extracted API: {api_def.tool_title}")
+                print(f"    --- API Definition ---\n    URL: {api_def.http_method} {api_def.api_url}\n    Description: {api_def.description}\n    Arguments: {api_def.argument}\n    Headers: {api_def.headers}\n    ----------------------")
+                
+                web_tools.append({
+                    "tool_title": api_def.tool_title,
+                    "description": api_def.description,
+                    "argument": api_def.argument,
+                    "api_url": api_def.api_url,
+                    "http_method": api_def.http_method,
+                    "headers": api_def.headers
+                })
+                
+            except Exception as e:
+                print(f"    Failed to find or parse API for '{capability}': {e}")
+                
+        return {"web_tools_found": web_tools}
 
     def node_test_tool(self, state: ToolDiscoveryState):
         """Simulates testing the newly discovered web tools by creating a runnable tool and executing it."""
@@ -317,6 +352,7 @@ class ToolDiscoveryWorkflow:
 
     async def tool_discovery_workflow_run(self, task: str):
         """Helper method to run the workflow with a complex task."""
+        print(f"=== Starting Tool Discovery Workflow for task: '{task}' ===")
         initial_state = {
             "task": task, 
             "search_queries": [],
@@ -329,4 +365,5 @@ class ToolDiscoveryWorkflow:
         }
         # Run the custom graph
         response = await self.workflow.ainvoke(initial_state)
+        print("=== Finished Tool Discovery Workflow ===")
         return response
