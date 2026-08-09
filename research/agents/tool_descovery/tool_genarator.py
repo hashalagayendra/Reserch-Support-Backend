@@ -1,6 +1,7 @@
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
 import requests
+from typing import Any
 
 def create_dynamic_api_tool(tool_dict: dict) -> StructuredTool:
     """
@@ -17,9 +18,24 @@ def create_dynamic_api_tool(tool_dict: dict) -> StructuredTool:
     # 1. Create the Pydantic schema dynamically for the LLM
     fields = {}
     for key, val in argument_schema.items():
-        # Assuming simple string type for now for these dynamic inputs
-        fields[key] = (str, ...)
-        
+        # Map the type to a Python type, defaulting to Any, and make it optional
+        arg_type_str = val.get("type", "string").lower()
+        python_type = str
+        if "int" in arg_type_str:
+            python_type = int
+        elif "number" in arg_type_str or "float" in arg_type_str:
+            python_type = float
+        elif "bool" in arg_type_str or "boolean" in arg_type_str:
+            python_type = bool
+        elif "list" in arg_type_str or "array" in arg_type_str:
+            python_type = list
+        elif "dict" in arg_type_str or "object" in arg_type_str:
+            python_type = dict
+        else:
+            python_type = Any
+            
+        fields[key] = (python_type, None)
+
     # LangChain requires a unique name for the Pydantic class
     DynamicArgsSchema = create_model(f"{tool_title}Schema", **fields)
 

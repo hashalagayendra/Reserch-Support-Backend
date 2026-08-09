@@ -35,6 +35,10 @@ class APIToolDefinition(BaseModel):
     api_url: str = Field(description="The full URL for the API endpoint.")
     http_method: str = Field(description="The HTTP method to use (e.g., 'GET', 'POST').")
     headers: Dict[str, str] = Field(description="Any required HTTP headers, like Accept or Content-Type.")
+    test_arguments: Dict[str, Any] = Field(
+        description="A dictionary containing valid, realistic test values for each of the arguments defined above, to be used when testing the API.",
+        default_factory=dict
+    )
 
 # --- STATE DEFINITION ---
 class ToolDiscoveryState(TypedDict):
@@ -129,10 +133,11 @@ class ToolDiscoveryWorkflow:
     def node_analyze_task(self, state: ToolDiscoveryState):
         """Uses LLM to break down the complex task into specific search queries."""
         task = state.get("task", "")
+        print("-" * 23)
         print(f"--- [Node: analyze_task] Breaking down task: '{task}' ---")
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an AI architect. Break down the user's task and determine what distinct AI tools or capabilities are required to accomplish it. Output a list of specific search queries to find these tools."),
+            ("system", "You are an AI architect. Break down the user's task and determine what distinct, GENERIC AI tools or APIs are required to accomplish it. DO NOT include specific data (like a specific country, city, or name) in the search queries. Instead, extract the general capability needed (e.g., 'Global Weather API' instead of 'Sri Lanka Weather API'). Output a list of these generic search queries to find the necessary tools."),
             ("user", "Task: {task}")
         ])
         
@@ -151,6 +156,7 @@ class ToolDiscoveryWorkflow:
     def node_explore_db(self, state: ToolDiscoveryState):
         """Searches the local PostgreSQL vector database for each query."""
         queries = state.get("search_queries", [])
+        print("-" * 23)
         print(f"--- [Node: explore_db] Searching DB for queries ---")
         
         found_tools = []
@@ -180,7 +186,10 @@ class ToolDiscoveryWorkflow:
                         found_tools.append({
                             "tool_title": tool_title,
                             "description": t.get("description"),
-                            "argument": t.get("argument")
+                            "argument": t.get("argument"),
+                            "api_url": t.get("api_url"),
+                            "http_method": t.get("http_method"),
+                            "headers": t.get("headers")
                         })
                         print(f"    [DB] -> Added tool to results: {tool_title}")
                     else:
@@ -192,12 +201,13 @@ class ToolDiscoveryWorkflow:
         """Uses LLM to evaluate if the found local tools are sufficient to complete the task."""
         task = state.get("task", "")
         local_tools = state.get("local_tools_found", [])
+        print("-" * 23)
         print(f"--- [Node: evaluate_tools] Evaluating {len(local_tools)} found tools against the task ---")
         
         tools_desc = "\n".join([f"- {t['tool_title']}: {t['description']}" for t in local_tools]) if local_tools else "No local tools found."
         
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a tool evaluator. You will be given a task and a list of available tools. Determine if the provided tools are completely sufficient to accomplish the task. If not, list the specific missing capabilities."),
+            ("system", "You are a tool evaluator. You will be given a task and a list of available tools. Determine if the provided tools are completely sufficient to accomplish the task. If not, list the GENERIC missing capabilities needed. Avoid including specific data like locations or names in the capability description (e.g., ask for a 'General Weather API' instead of 'Tools to look up weather in Sri Lanka')."),
             ("user", "Task: {task}\n\nAvailable Tools:\n{tools}")
         ])
         
@@ -223,12 +233,13 @@ class ToolDiscoveryWorkflow:
         from duckduckgo_search import DDGS
         
         missing = state.get("missing_capabilities", [])
+        print("-" * 23)
         print(f"--- [Node: web_search] Searching Web for missing capabilities ---")
         
         web_tools = []
         for capability in missing:
             print(f"    Searching for: {capability}")
-            query = f"{capability} free API JSON"
+            query = f"{capability} open free API without API key JSON"
             try:
                 results = DDGS().text(query, max_results=5)
                 search_text = "\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nURL: {r.get('href')}\n" for r in results])
@@ -236,7 +247,7 @@ class ToolDiscoveryWorkflow:
                 print(f"    Analyzing search results for: {capability}")
                 print(f"    --- Search Results Preview ---\n{search_text[:500]}...\n    ------------------------------")
                 prompt = ChatPromptTemplate.from_messages([
-                    ("system", "You are an API extraction assistant. Your job is to extract a runnable, public, preferably free API definition from the given search results that matches the user's capability requirement. Do not hallucinate APIs; only use information from the search results if possible, or fallback to known public APIs that perfectly match the requirement. Always return a valid JSON API definition."),
+                    ("system", "You are an API extraction assistant. Your job is to extract a runnable, public API definition from the given search results that matches the user's capability requirement. CRITICAL REQUIREMENT: The API MUST be completely free and MUST NOT require any API keys, authentication, or registration. Do not hallucinate APIs. If all search results require an API key, fallback to a known open API (like Open-Meteo for weather). Always return a valid JSON API definition."),
                     ("user", "Capability required: {capability}\n\nSearch Results:\n{search_results}")
                 ])
                 
@@ -252,7 +263,8 @@ class ToolDiscoveryWorkflow:
                     "argument": api_def.argument,
                     "api_url": api_def.api_url,
                     "http_method": api_def.http_method,
-                    "headers": api_def.headers
+                    "headers": api_def.headers,
+                    "test_arguments": api_def.test_arguments
                 })
                 
             except Exception as e:
@@ -265,6 +277,7 @@ class ToolDiscoveryWorkflow:
         from research.agents.tool_descovery.tool_genarator import create_dynamic_api_tool
         
         web_tools = state.get("web_tools_found", [])
+        print("-" * 23)
         print("--- [Node: test_tool] Testing discovered web tools ---")
         
         tested = []
@@ -275,8 +288,9 @@ class ToolDiscoveryWorkflow:
                 print(f"    Created runnable tool: {runnable_tool.name}")
                 
                 # 2. Test the runnable tool with mock input
-                mock_args = {}
-                if wt.get("argument"):
+                mock_args = wt.get("test_arguments", {})
+                if not mock_args and wt.get("argument"):
+                    # Fallback in case test_arguments is empty
                     first_key = list(wt["argument"].keys())[0]
                     mock_args[first_key] = "test run"
                     
@@ -298,6 +312,7 @@ class ToolDiscoveryWorkflow:
     def node_store_tool(self, state: ToolDiscoveryState):
         """Stores the successfully tested tools into the local database."""
         tested_tools = state.get("tested_tools", [])
+        print("-" * 23)
         print("--- [Node: store_tool] Caching validated tools to database ---")
         
         if not self.db_client:
@@ -331,6 +346,7 @@ class ToolDiscoveryWorkflow:
 
     def node_final_answer(self, state: ToolDiscoveryState):
         """Generates the final response based on what was found."""
+        print("-" * 23)
         local = state.get("local_tools_found", [])
         new_tools = state.get("tested_tools", [])
         is_sufficient = state.get("is_sufficient")
