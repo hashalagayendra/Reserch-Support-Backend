@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 
-from research.agents.tool_descovery.tool_discovery import ToolDiscoveryWorkflow
+from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
 from research.db_operations.main import ToolDBClient
 from app.core.config import settings
 

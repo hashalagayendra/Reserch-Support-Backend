@@ -274,7 +274,7 @@ class ToolDiscoveryWorkflow:
 
     def node_test_tool(self, state: ToolDiscoveryState):
         """Simulates testing the newly discovered web tools by creating a runnable tool and executing it."""
-        from research.agents.tool_descovery.tool_genarator import create_dynamic_api_tool
+        from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
         
         web_tools = state.get("web_tools_found", [])
         print("-" * 23)
@@ -289,10 +289,8 @@ class ToolDiscoveryWorkflow:
                 
                 # 2. Test the runnable tool with mock input
                 mock_args = wt.get("test_arguments", {})
-                if not mock_args and wt.get("argument"):
-                    # Fallback in case test_arguments is empty
-                    first_key = list(wt["argument"].keys())[0]
-                    mock_args[first_key] = "test run"
+                if not mock_args:
+                    raise Exception("not argument")
                     
                 test_result = runnable_tool.invoke(mock_args)
                 print(f"    Test Result: {test_result}")

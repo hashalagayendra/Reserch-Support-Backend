@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routers import student, research, tool_discovery_test, ai_tool
+from app.api.routers import student, research, tool_discovery_test, ai_tool, main_workflow_test
 
 api_router = APIRouter()
 
@@ -29,4 +29,11 @@ api_router.include_router(
     ai_tool.router,
     prefix="/ai-tools",
     tags=["ai-tools"]
+)
+
+# Include the main workflow router
+api_router.include_router(
+    main_workflow_test.router,
+    prefix="/main-workflow-test",
+    tags=["main-workflow-test"]
 )
