@@ -1,7 +1,14 @@
 from typing import List, Dict, Any
 from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import tool
 from langchain_openrouter import ChatOpenRouter
 from app.core.config import settings
+
+@tool
+def get_weather(location: str) -> str:
+    """Get the current weather for a location."""
+    # Hardcoded weather data for testing
+    return f"The weather in {location} is 72 degrees and sunny."
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
 from research.workflows.main_workflow.helpers import get_recent_models, get_each_model_details, get_design_arena_benchmarks
 
@@ -53,28 +60,35 @@ ai_tools_data: List[Dict[str, Any]] = [
     }
 ]
 
-class SimpleAgentWorkflow:
-    def __init__(self, api_key: str = None):
-        self.api_key = api_key or getattr(settings, "OPENROUTER_API_KEY", None)
-        self.model_name = getattr(settings, "TOOL_DISCOVERY_MODEL", "gpt-4o-mini")
+class MainWorkFlow:
+    def __init__(self, api_key: str = None, model_name: str = None, temperature: float = 0.5):
+        self.api_key = api_key 
+        self.model_name = model_name 
+        self.temperature = temperature
         
         # 1. Create tools from the db/data array
-        self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
+        self.tools = [get_weather]
         
         # 2. Initialize LLM
         self.llm = ChatOpenRouter(
             model=self.model_name,
-            temperature=0,
+            temperature=self.temperature,
             api_key=self.api_key
         )
         
         # 3. Create agent
-        self.agent_executor = create_react_agent(self.llm, self.tools)
+        self.agent_executor = create_react_agent(self.llm, tools=self.tools)
 
-    async def run(self, prompt: str) -> dict:
+    async def test_tool_agent(self, prompt: str) -> dict:
+        """
+        Method to test the main workflow tool agent.
+        
+        Args:-
+            prompt (str): The prompt to test the tool agent with.
+        """
         result = await self.agent_executor.ainvoke({"messages": [("user", prompt)]})
-        final_message = result["messages"][-1].content
+        
         return {
-            "response": final_message,
+            "response": result["messages"][-1].content if result and "messages" in result else "",
             "tools_available": [t.name for t in self.tools]
         }

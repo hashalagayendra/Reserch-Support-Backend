@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     TOOL_DISCOVERY_MODEL: str = "deepseek/deepseek-v4-flash"
     TOOL_DISCOVERY_TEMPERATURE: float = 0.8
     EMBEDDING_MODEL: str = "voyageai/voyage-4-lite"
+    MAIN_WORKFLOW_MODEL: str = "deepseek/deepseek-v4-flash"
+    MAIN_WORKFLOW_TEMPERATURE: float = 0.0
 
 
     class Config:
