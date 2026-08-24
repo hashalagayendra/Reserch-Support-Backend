@@ -1,14 +1,10 @@
 from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import PromptTemplate
 from langgraph.prebuilt import create_react_agent
-from langchain_core.tools import tool
 from langchain_openrouter import ChatOpenRouter
 from app.core.config import settings
-
-@tool
-def get_weather(location: str) -> str:
-    """Get the current weather for a location."""
-    # Hardcoded weather data for testing
-    return f"The weather in {location} is 72 degrees and sunny."
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
 from research.workflows.main_workflow.helpers import get_recent_models, get_each_model_details, get_design_arena_benchmarks
 
@@ -18,41 +14,42 @@ from research.workflows.main_workflow.helpers import get_recent_models, get_each
 # The table structure expects: tool_title, description, argument, api_url, http_method, headers.
 ai_tools_data: List[Dict[str, Any]] = [
     {
-        "tool_title": "GitHub User Details",
-        "description": "Provides publicly available information about someone with a GitHub account.",
+        "tool_title": "geocodeLocation",
+        "description": "Geocoding API to convert location names (e.g., 'Sri Lanka') to latitude/longitude coordinates. Uses the free Open-Meteo Geocoding API which requires no API key.",
         "argument": {
-            "type": "object",
-            "properties": {
-                "username": {
-                    "type": "string",
-                    "description": "The handle for the GitHub user account."
-                }
-            },
-            "required": ["username"]
+            "name": {"type": "string", "description": "The location name to geocode, e.g., 'Sri Lanka', 'New York', 'Tokyo'"}
         },
-        "api_url": "https://api.github.com/users/{username}",
+        "api_url": "https://geocoding-api.open-meteo.com/v1/search?name={name}&count=1&language=en&format=json",
         "http_method": "GET",
         "headers": {
-            "Accept": "application/vnd.github.v3+json"
+            "Accept": "application/json"
         }
     },
     {
         "tool_title": "OpenMeteoWeather",
         "description": "Fetches current weather, hourly, and daily forecasts for a given latitude and longitude. No API key required.",
         "argument": {
-            "type": "object",
-            "properties": {
-                "latitude": {"type": "number", "description": "Latitude of the location (e.g., 52.52)"},
-                "longitude": {"type": "number", "description": "Longitude of the location (e.g., 13.41)"},
-                "current_weather": {"type": "boolean", "description": "Set to true to include current weather in the response"},
-                "hourly": {"type": "string", "description": "Comma-separated list of hourly variables (e.g., 'temperature_2m,relative_humidity_2m,wind_speed_10m')"},
-                "daily": {"type": "string", "description": "Comma-separated list of daily variables (e.g., 'temperature_2m_max,temperature_2m_min,precipitation_sum')"},
-                "timezone": {"type": "string", "description": "Timezone for the response (e.g., 'auto', 'America/New_York', 'Europe/Berlin')"},
-                "forecast_days": {"type": "integer", "description": "Number of days to forecast (1-16). Default is 7."}
-            },
-            "required": ["latitude", "longitude"]
+            "latitude": {"type": "number", "description": "Latitude of the location (e.g., 52.52)"},
+            "longitude": {"type": "number", "description": "Longitude of the location (e.g., 13.41)"},
+            "current_weather": {"type": "boolean", "description": "Set to true to include current weather in the response"},
+            "hourly": {"type": "string", "description": "Comma-separated list of hourly variables (e.g., 'temperature_2m,relative_humidity_2m,wind_speed_10m')"},
+            "daily": {"type": "string", "description": "Comma-separated list of daily variables (e.g., 'temperature_2m_max,temperature_2m_min,precipitation_sum')"},
+            "timezone": {"type": "string", "description": "Timezone for the response (e.g., 'auto', 'America/New_York', 'Europe/Berlin')"},
+            "forecast_days": {"type": "integer", "description": "Number of days to forecast (1-16). Default is 7."}
         },
         "api_url": "https://api.open-meteo.com/v1/forecast",
+        "http_method": "GET",
+        "headers": {
+            "Accept": "application/json"
+        }
+    },
+    {
+        "tool_title": "getBitcoinPrice",
+        "description": "Fetch current Bitcoin price and details from CoinGecko free public API (no key required)",
+        "argument": {
+            "currency": {"type": "string", "description": "The fiat currency to display price in, e.g. usd, eur, gbp, jpy, etc."}
+        },
+        "api_url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={currency}",
         "http_method": "GET",
         "headers": {
             "Accept": "application/json"
@@ -67,7 +64,7 @@ class MainWorkFlow:
         self.temperature = temperature
         
         # 1. Create tools from the db/data array
-        self.tools = [get_weather]
+        self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
         
         # 2. Initialize LLM
         self.llm = ChatOpenRouter(
@@ -76,6 +73,12 @@ class MainWorkFlow:
             api_key=self.api_key
         )
         
+        self.mainAgent = ChatOpenRouter(
+            model=self.model_name,
+            temperature=self.temperature,
+            api_key=self.api_key
+        )
+
         # 3. Create agent
         self.agent_executor = create_react_agent(self.llm, tools=self.tools)
 
@@ -92,3 +95,37 @@ class MainWorkFlow:
             "response": result["messages"][-1].content if result and "messages" in result else "",
             "tools_available": [t.name for t in self.tools]
         }
+
+    async def divide_task(self, task: str) -> dict:
+        """
+        Takes a main task and divides it into sub-tasks for sub-agents.
+        Returns a structured dictionary containing sub-agent configurations.
+        """
+        parser = JsonOutputParser(pydantic_object=TaskDivisionResult)
+
+        prompt = PromptTemplate(
+            template="You are a Task Orchestrator Agent. Your job is to divide the user's task into logical sub-tasks for specialized sub-agents.\n"
+                     "You must return the sub-agents with their specific tool assignments, system prompts, tasks, and any extra necessary details.\n"
+                     "Available tools data:\n{tools_data}\n\n"
+                     "User Task: {task}\n\n"
+                     "{format_instructions}\n",
+            input_variables=["task"],
+            partial_variables={
+                "format_instructions": parser.get_format_instructions(), 
+                "tools_data": str([{"tool_title": t["tool_title"], "description": t["description"]} for t in ai_tools_data])
+            }
+        )
+        chain = prompt | self.mainAgent | parser
+        result = await chain.ainvoke({"task": task})
+        return result
+
+class SubAgentConfig(BaseModel):
+    name: str = Field(description="Name of the sub-agent")
+    task: str = Field(description="The specific sub-task assigned to this agent")
+    system_prompt: str = Field(description="The system prompt defining the agent's behavior")
+    tools: List[str] = Field(description="List of tool titles to be given to this agent. Must be selected from available tools.")
+    extra_details: str = Field(description="Any extra necessary details or context")
+
+class TaskDivisionResult(BaseModel):
+    sub_agents: List[SubAgentConfig] = Field(description="List of sub-agents required to complete the main task")
+
