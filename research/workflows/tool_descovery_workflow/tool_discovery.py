@@ -30,11 +30,11 @@ class APIToolDefinition(BaseModel):
     tool_title: str = Field(description="A short, unique, camelCase or snake_case name for the tool.")
     description: str = Field(description="A clear description of what the tool does.")
     argument: Dict[str, Dict[str, Any]] = Field(
-        description="A dictionary of arguments. Each key is the argument name, and the value is another dictionary containing 'type' and 'description'."
+        description="A dictionary of arguments. Each key is the argument name, and the value is a dictionary containing 'type' (e.g. 'string', 'number', 'boolean', 'integer'), 'description', and 'in' ('query', 'path', 'body', or 'header')."
     )
-    api_url: str = Field(description="The full URL for the API endpoint.")
-    http_method: str = Field(description="The HTTP method to use (e.g., 'GET', 'POST').")
-    headers: Dict[str, str] = Field(description="Any required HTTP headers, like Accept or Content-Type.")
+    api_url: str = Field(description="The full URL for the API endpoint. If path variables are needed, use {param_name} placeholders in the URL.")
+    http_method: str = Field(description="The HTTP method to use (e.g., 'GET', 'POST', 'PUT').")
+    headers: Dict[str, str] = Field(description="Any required HTTP headers, like {'Accept': 'application/json'} or {'Content-Type': 'application/json'}.")
     test_arguments: Dict[str, Any] = Field(
         description="A dictionary containing valid, realistic test values for each of the arguments defined above, to be used when testing the API.",
         default_factory=dict
@@ -247,7 +247,16 @@ class ToolDiscoveryWorkflow:
                 print(f"    Analyzing search results for: {capability}")
                 print(f"    --- Search Results Preview ---\n{search_text[:500]}...\n    ------------------------------")
                 prompt = ChatPromptTemplate.from_messages([
-                    ("system", "You are an API extraction assistant. Your job is to extract a runnable, public API definition from the given search results that matches the user's capability requirement. CRITICAL REQUIREMENT: The API MUST be completely free and MUST NOT require any API keys, authentication, or registration. Do not hallucinate APIs. If all search results require an API key, fallback to a known open API (like Open-Meteo for weather). Always return a valid JSON API definition."),
+                    ("system", "You are an API extraction assistant. Your job is to extract a runnable, public API definition from the given search results that matches the user's capability requirement.\n"
+                               "CRITICAL REQUIREMENTS:\n"
+                               "1. The API MUST be completely free and MUST NOT require any API keys, authentication, or registration.\n"
+                               "2. Do not hallucinate APIs. If all search results require an API key, fallback to a known open free API (like Open-Meteo for weather, CoinGecko for crypto, genderize.io, etc.).\n"
+                               "3. Method & Parameter Structure:\n"
+                               "   - For each parameter in `argument`, provide 'type', 'description', and 'in' ('query', 'path', 'body', or 'header').\n"
+                               "   - For GET APIs: Provide clean base URL in `api_url` or use `{{param_name}}` in URL for path variables. Set `in: 'query'` for URL query params, or `in: 'path'` for path variables.\n"
+                               "   - For POST/PUT APIs: Set `http_method` to 'POST', specify headers (e.g. {{'Content-Type': 'application/json'}}), and set `in: 'body'` for request body fields.\n"
+                               "4. Provide realistic, working sample values in `test_arguments` matching every argument defined in `argument` so the tool can be executed and validated.\n"
+                               "5. Always return a valid JSON API definition."),
                     ("user", "Capability required: {capability}\n\nSearch Results:\n{search_results}")
                 ])
                 
@@ -287,15 +296,19 @@ class ToolDiscoveryWorkflow:
                 runnable_tool = create_dynamic_api_tool(wt)
                 print(f"    Created runnable tool: {runnable_tool.name}")
                 
-                # 2. Test the runnable tool with mock input
-                mock_args = wt.get("test_arguments", {})
-                if not mock_args:
-                    raise Exception("not argument")
-                    
-                test_result = runnable_tool.invoke(mock_args)
-                print(f"    Test Result: {test_result}")
+                # 2. Prepare test arguments
+                mock_args = dict(wt.get("test_arguments") or {})
+                arg_schema = wt.get("argument") or {}
                 
-                if isinstance(test_result, str) and test_result.startswith("Error executing tool:"):
+                # If the tool requires arguments but no test_arguments were generated, raise an exception
+                if arg_schema and not mock_args:
+                    raise ValueError(f"No test arguments generated for tool '{wt.get('tool_title', 'Unknown')}' with argument schema: {list(arg_schema.keys())}")
+
+                # 3. Execute the tool with test arguments
+                test_result = runnable_tool.invoke(mock_args)
+                print(f"    Test Result: {test_result[:200] if isinstance(test_result, str) else test_result}")
+                
+                if isinstance(test_result, str) and test_result.startswith("Error executing tool"):
                     raise Exception(test_result)
                 
                 wt["tested_and_passed"] = True

@@ -69,3 +69,33 @@ def test_store_tool(state: ToolDiscoveryStateModel):
 @router.post("/final_answer")
 def test_final_answer(state: ToolDiscoveryStateModel):
     return test_workflow.node_final_answer(state.model_dump())
+
+class FullDiscoveryQueryRequest(BaseModel):
+    query: str = Field(default="Find a tool to get the current weather in Tokyo.")
+
+@router.post("/run_fully_tool_discovery_workflow")
+async def run_fully_tool_discovery_workflow(request: FullDiscoveryQueryRequest):
+    """
+    Runs the complete end-to-end Tool Discovery Workflow with the given task query.
+    """
+    from fastapi import HTTPException
+    from research.main import Research
+    
+    try:
+        research_agent = Research()
+        research_agent.configure(
+            openRouterAPIKey=settings.OPENROUTER_API_KEY,
+            toolDiscoveryModel=settings.TOOL_DISCOVERY_MODEL,
+            toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE,
+            projectApiKey=settings.PROJECT_API_KEY
+        )
+        result = await research_agent.run(request.query)
+        
+        final_response = result.get("final_answer", "")
+        return {
+            "response": final_response,
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
