@@ -15,7 +15,7 @@ class Research:
     def __init__(self):
         pass
 
-    def configure(self, openRouterAPIKey: str, toolDiscoveryModel: str, toolDiscoveryModelTemperature: float, projectApiKey: str = None, mainWorkflowModel: str = "gpt-4o-mini", mainWorkflowModelTemperature: float = 0.0):
+    def configure(self, openRouterAPIKey: str, toolDiscoveryModel: str, toolDiscoveryModelTemperature: float, projectApiKey: str = None, mainWorkflowModel: str = "deepseek/deepseek-v4-flash", mainWorkflowModelTemperature: float = 0.0):
 
         """
         Args:-
