@@ -131,8 +131,8 @@ async def test_tool_agent(request: AgentTestRequest):
 
 class MainOrchestratorTestRequest(BaseModel):
     task: str = Field(
-        default="Research the latest advancements in quantum computing and write a summary report.", 
-        description="The task for the main orchestrator agent to divide into sub-agent workflows."
+        default="Find the geographic coordinates for Tokyo and London, retrieve their current weather and temperature forecasts using their coordinates, and provide a weather comparison summary.", 
+        description="The task for the main orchestrator agent to divide into sub-agent workflows and execute."
     )
     api_key: Optional[str] = Field(
         default=None, 
