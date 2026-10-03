@@ -24,13 +24,13 @@ class SubAgentConfig(BaseModel):
     model_name: str = Field(description="The LLM model name to use for this sub-agent. Must strictly be 'deepseek/deepseek-v4-flash'")
 
 
-class ExecutionLayer(BaseModel):
+class BasicLayer(BaseModel):
     layer_number: int = Field(description="The sequential execution layer number (e.g. 1, 2, 3...)")
     sub_agents: List[SubAgentConfig] = Field(description="List of sub-agents that run in parallel within this layer")
 
 
 class TaskDivisionResult(BaseModel):
-    layers: List[ExecutionLayer] = Field(description="Ordered list of execution layers to run sequentially, where all sub-agents within each layer run in parallel")
+    layers: List[BasicLayer] = Field(description="Ordered list of execution layers to run sequentially, where all sub-agents within each layer run in parallel")
 
 
 # --- EXECUTABLE AGENT & LAYER SCHEMAS ---
@@ -291,7 +291,7 @@ class MainWorkFlow:
 
         # 2. Iterate layer by layer
         for layer in raw_layers:
-            if isinstance(layer, ExecutionLayer):
+            if isinstance(layer, BasicLayer):
                 layer_num = layer.layer_number
                 sub_agents_list = layer.sub_agents
             elif isinstance(layer, dict):
