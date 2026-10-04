@@ -23,18 +23,6 @@ class Student(Base, TimestampMixin):
     is_active = Column(Boolean, default=True)
 
 
-class ProjectApiKey(Base, TimestampMixin):
-    """
-    Association Object for the many-to-many relationship between Project and ApiKey.
-    Using a class instead of a Table allows you to easily add extra fields in the future
-    (like `assigned_at`, `permissions`, etc.).
-    """
-    __tablename__ = "project_apikeys"
-
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
-    apikey_id = Column(Integer, ForeignKey("api_keys.id", ondelete="CASCADE"), primary_key=True)
-
-
 class User(Base, TimestampMixin):
     __tablename__ = "users"
 
@@ -53,7 +41,7 @@ class Project(Base, TimestampMixin):
     name = Column(String, index=True, nullable=False)
 
     user = relationship("User", back_populates="projects")
-    api_keys = relationship("ApiKey", secondary="project_apikeys", back_populates="projects")
+    api_keys = relationship("ApiKey", back_populates="project", cascade="all, delete-orphan")
     ai_tools = relationship("AITool", back_populates="project", cascade="all, delete-orphan")
 
 
@@ -61,9 +49,10 @@ class ApiKey(Base, TimestampMixin):
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     key_value = Column(String, unique=True, index=True, nullable=False)
 
-    projects = relationship("Project", secondary="project_apikeys", back_populates="api_keys")
+    project = relationship("Project", back_populates="api_keys")
 
 
 class AITool(Base, TimestampMixin):

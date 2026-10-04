@@ -39,10 +39,10 @@ def seed_database():
             if not project:
                 project = Project(user_id=user.id, name=ud["project_name"])
                 db.add(project)
-                
+                db.flush()
                 # Create an API key for the project
-                new_api_key = ApiKey(key_value=f"sk-dummy-{uuid.uuid4().hex[:8]}")
-                project.api_keys.append(new_api_key)
+                new_api_key = ApiKey(project_id=project.id, key_value=f"sk-dummy-{uuid.uuid4().hex[:8]}")
+                db.add(new_api_key)
                 
                 db.commit()
                 db.refresh(project)

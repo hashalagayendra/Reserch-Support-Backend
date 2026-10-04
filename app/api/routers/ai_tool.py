@@ -1,40 +1,63 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, ConfigDict
 
 from app.db.session import get_db
 from app.db.models import AITool, ApiKey
-from app.schemas.ai_tool import AIToolCreate, AIToolResponse, ToolSearchRequest
 from app.api.deps import get_api_key
+
+# --- SCHEMAS ---
+class AIToolBaseSchema(BaseModel):
+    tool_title: str
+    description: Optional[str] = None
+    argument: Optional[Dict[str, Any]] = None
+    api_url: Optional[str] = None
+    http_method: Optional[str] = None
+    headers: Optional[Dict[str, Any]] = None
+
+class AIToolCreateRequest(AIToolBaseSchema):
+    project_id: Optional[int] = None
+    vector_data: Optional[List[float]] = None
+
+class AIToolResponseSchema(AIToolBaseSchema):
+    id: int
+    project_id: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class AIToolSearchRequest(BaseModel):
+    query_vector: List[float]
+    limit: int = 2
 
 router = APIRouter()
 
-@router.post("/", response_model=AIToolResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=AIToolResponseSchema, status_code=status.HTTP_201_CREATED)
 def create_ai_tool(
-    ai_tool_in: AIToolCreate, 
+    ai_tool_in: AIToolCreateRequest, 
     db: Session = Depends(get_db),
     api_key: ApiKey = Depends(get_api_key)
 ):
     """
     Create a new AI Tool.
     """
-    if not api_key.projects:
+    if not api_key.project_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="API Key is not associated with any projects."
+            detail="API Key is not associated with any project."
         )
 
-    # Use provided project_id if valid, otherwise fallback to the API key's first project
+    # Use provided project_id if valid, otherwise fallback to the API key's project
     if ai_tool_in.project_id is not None:
-        if ai_tool_in.project_id not in [p.id for p in api_key.projects]:
+        if ai_tool_in.project_id != api_key.project_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="API Key does not have access to this project."
             )
         target_project_id = ai_tool_in.project_id
     else:
-        target_project_id = api_key.projects[0].id
+        target_project_id = api_key.project_id
 
     new_tool = AITool(
         project_id=target_project_id,
@@ -60,22 +83,20 @@ def create_ai_tool(
 
 
 
-@router.post("/search", response_model=List[AIToolResponse])
+@router.post("/search", response_model=List[AIToolResponseSchema])
 def search_ai_tools(
-    search_req: ToolSearchRequest, 
+    search_req: AIToolSearchRequest, 
     db: Session = Depends(get_db),
     api_key: ApiKey = Depends(get_api_key)
 ):
     """
-    Search AI Tools using vector similarity.
+    Search AI Tools using vector similarity within the project associated with the API Key.
     """
-    # Ensure the user can only search within projects they have access to
-    allowed_project_ids = [p.id for p in api_key.projects]
-    if not allowed_project_ids:
+    if not api_key.project_id:
         return []
 
     tools = db.query(AITool).filter(
-        AITool.project_id.in_(allowed_project_ids)
+        AITool.project_id == api_key.project_id
     ).order_by(
         AITool.vector_data.cosine_distance(search_req.query_vector)
     ).limit(search_req.limit).all()

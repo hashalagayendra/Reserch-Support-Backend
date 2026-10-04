@@ -8,7 +8,7 @@ from sqlalchemy import text
 from app.db.session import engine
 
 def alter_tables():
-    tables = ['students', 'project_apikeys', 'users', 'projects', 'api_keys', 'ai_tools']
+    tables = ['students', 'users', 'projects', 'api_keys', 'ai_tools']
     
     with engine.connect() as conn:
         for table in tables:
