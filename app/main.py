@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from app.core.config import settings
-from app.api.main_router import api_router
+from app.api.router import api_router
 from app.db.session import engine
 from app.db.models import Base
 

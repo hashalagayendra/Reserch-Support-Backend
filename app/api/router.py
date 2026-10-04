@@ -1,12 +1,13 @@
 from fastapi import APIRouter
-from app.api.routers import student, tool_discovery_test, ai_tool, main_workflow_test, openrouter_models
+from app.api.routers import ai_tool
+from app.api.routers.client_test import student, tool_discovery_test, main_workflow_test, openrouter_models
 
 api_router = APIRouter()
 
-# Include the student router without the security dependency
+# Include the student router under /client-test/students
 api_router.include_router(
     student.router, 
-    prefix="/students", 
+    prefix="/client-test/students", 
     tags=["students"]
 )
 
@@ -37,5 +38,3 @@ api_router.include_router(
     prefix="/client-test/main-workflow-test",
     tags=["main-workflow-test"]
 )
-
-
