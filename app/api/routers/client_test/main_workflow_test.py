@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import Optional
 from pydantic import BaseModel, Field
-from app.core.config import settings
+from app.core.client_side_test_config import settings
 
 router = APIRouter()
 

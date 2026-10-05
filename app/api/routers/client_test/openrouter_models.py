@@ -6,7 +6,7 @@ from research.workflows.main_workflow.utility import (
     get_each_model_details,
     get_design_arena_benchmarks,
 )
-from app.core.config import settings
+from app.core.client_side_test_config import settings
 
 router = APIRouter()
 

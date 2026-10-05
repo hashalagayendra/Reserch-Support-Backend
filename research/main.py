@@ -1,7 +1,8 @@
 from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
 from research.workflows.main_workflow.main_workflow import MainWorkFlow
 from research.db_operations.main import ToolDBClient
-from app.core.config import settings
+from app.core.client_side_test_config import settings
+from app.core.backend_config import backend_settings
 
 class Research:
     openRouterAPIKey:str
@@ -55,7 +56,7 @@ class Research:
 
         # Initialize the DB Client
         api_key = self.projectApiKey or settings.DUMMY_API_KEY
-        base_url = f"http://127.0.0.1:8000{settings.API_V1_STR}"
+        base_url = f"http://127.0.0.1:8000{backend_settings.API_V1_STR}"
         db_client = ToolDBClient(base_url=base_url, api_key=api_key)
 
         self.tool_discovery_workflow = ToolDiscoveryWorkflow(
@@ -71,13 +72,13 @@ class Research:
             temperature=self.mainWorkflowModelTemperature
         )
 
-    async def run(self, query: str):
-        """ 
-        Args:-
-            query (str): The query to run the tool discovery agent with.
-        """
+    # async def run(self, query: str):
+    #     """ 
+    #     Args:-
+    #         query (str): The query to run the tool discovery agent with.
+    #     """
        
-        response = await self.tool_discovery_workflow.tool_discovery_workflow_run(query)
+    #     response = await self.tool_discovery_workflow.tool_discovery_workflow_run(query)
        
-        return response
+    #     return response
 

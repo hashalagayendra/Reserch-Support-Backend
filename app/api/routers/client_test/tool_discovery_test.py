@@ -4,13 +4,14 @@ from typing import List, Dict, Any, Optional
 
 from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
 from research.db_operations.main import ToolDBClient
-from app.core.config import settings
+from app.core.client_side_test_config import settings
+from app.core.backend_config import backend_settings
 
 router = APIRouter()
 
 # Initialize the DB Client for testing
 api_key = settings.PROJECT_API_KEY or settings.DUMMY_API_KEY
-base_url = f"http://127.0.0.1:8000{settings.API_V1_STR}"
+base_url = f"http://127.0.0.1:8000{backend_settings.API_V1_STR}"
 test_db_client = ToolDBClient(base_url=base_url, api_key=api_key)
 
 # Initialize workflow for testing individual nodes
@@ -89,7 +90,7 @@ async def run_fully_tool_discovery_workflow(request: FullDiscoveryQueryRequest):
             toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE,
             projectApiKey=settings.PROJECT_API_KEY
         )
-        result = await research_agent.run(request.query)
+        result = await research_agent.tool_discovery_workflow.tool_discovery_workflow_run(request.query)
         
         final_response = result.get("final_answer", "")
         return {

@@ -6,7 +6,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from langgraph.prebuilt import create_react_agent
 from langchain_openrouter import ChatOpenRouter
-from app.core.config import settings
+from app.core.client_side_test_config import settings
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
 from research.workflows.main_workflow.utility import (
     get_recent_models,

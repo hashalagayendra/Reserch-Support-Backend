@@ -4,7 +4,7 @@ from sqlalchemy import text
 from contextlib import asynccontextmanager
 import uvicorn
 
-from app.core.config import settings
+from app.core.backend_config import settings
 from app.api.router import api_router
 from app.db.session import engine
 from app.db.models import Base

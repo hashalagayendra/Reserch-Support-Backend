@@ -1,10 +1,6 @@
 from pydantic_settings import BaseSettings
 
-class Settings(BaseSettings):
-    API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Reserch2 API"
-    # Using a dummy database URL for demonstration purposes
-    DATABASE_URL: str = "postgresql://dummy_user:dummy_pass@localhost:5432/dummy_db"
+class ClientSideTestSettings(BaseSettings):
     DUMMY_API_KEY: str = "dummy_secret_key"
     PROJECT_API_KEY: str = "sk-dummy-4e970dfd"
     OPENROUTER_API_KEY: str = ""
@@ -14,8 +10,11 @@ class Settings(BaseSettings):
     MAIN_WORKFLOW_MODEL: str = "deepseek/deepseek-v4-flash"
     MAIN_WORKFLOW_TEMPERATURE: float = 0.0
 
-
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
-settings = Settings()
+client_side_test_settings = ClientSideTestSettings()
+
+# Alias for backwards compatibility
+settings = client_side_test_settings

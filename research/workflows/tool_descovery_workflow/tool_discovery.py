@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-from app.core.config import settings
+from app.core.client_side_test_config import settings
 
 # --- STRUCTURED OUTPUT MODELS ---
 class TaskAnalysis(BaseModel):
