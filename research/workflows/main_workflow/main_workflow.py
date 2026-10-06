@@ -6,6 +6,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
 from langgraph.prebuilt import create_react_agent
 from langchain_openrouter import ChatOpenRouter
+from langchain_core.tools import StructuredTool
 from app.core.client_side_test_config import settings
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
 from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
@@ -98,15 +99,18 @@ class MainWorkFlow:
         temperature: float = 0.5,
         tool_discovery_workflow: Optional[ToolDiscoveryWorkflow] = None
     ):
-        self.api_key = api_key 
-        self.model_name = model_name 
-        self.temperature = temperature
+        self.api_key = api_key or settings.OPENROUTER_API_KEY
+        self.model_name = model_name or settings.MAIN_WORKFLOW_MODEL
+        self.temperature = temperature if temperature is not None else settings.MAIN_WORKFLOW_TEMPERATURE
         self.tool_discovery_workflow = tool_discovery_workflow
         
         # 1. Create tools from the db/data array
         self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
         
-        # 2. Initialize LLM
+        # 2. Convert tool discovery workflow to executable tool returning workflow state and store in self (separate tool)
+        self.tool_discovery_tool: Optional[StructuredTool] = self.create_tool_discovery_tool()
+        
+        # 3. Initialize LLM
         self.llm = ChatOpenRouter(
             model=self.model_name,
             temperature=self.temperature,
@@ -119,7 +123,7 @@ class MainWorkFlow:
             api_key=self.api_key
         )
 
-        # 3. Initialize orchestrator memory store
+        # 4. Initialize orchestrator memory store
         self.main_orchestrator_memory_store: List[Dict[str, Any]] = [
             {
                 "role": "system",
@@ -131,9 +135,30 @@ class MainWorkFlow:
             }
         ]
 
-        # 4. Create agent & layers container
+        # 5. Create agent & layers container
         self.executable_layers: Optional[ExecutableLayers] = None
         self.agent_executor = create_react_agent(self.llm, tools=self.tools)
+
+    def create_tool_discovery_tool(
+        self,
+        workflow: Optional[ToolDiscoveryWorkflow] = None
+    ) -> Optional[StructuredTool]:
+        """
+        Converts the tool_discovery_workflow into an executable LangChain StructuredTool
+        that executes the discovery workflow and returns its complete workflow state.
+        """
+        target_wf = workflow or self.tool_discovery_workflow
+        if not target_wf:
+            return None
+
+        async def _run_tool_discovery(task: str) -> dict:
+            return await target_wf.tool_discovery_workflow_run(task)
+
+        return StructuredTool.from_function(
+            name="tool_discovery_workflow",
+            description="Executes the Tool Discovery Workflow for a task and returns the complete tool discovery workflow state.",
+            coroutine=_run_tool_discovery,
+        )
 
     async def test_tool_agent(self, prompt: str) -> dict:
         """
