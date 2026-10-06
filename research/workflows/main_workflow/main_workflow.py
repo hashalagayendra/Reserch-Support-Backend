@@ -180,7 +180,7 @@ class MainWorkFlow:
 
         # 5. Extract only necessary layers data and build executable agent layers
         layers_data = result.get("layers", []) if isinstance(result, dict) else getattr(result, "layers", [])
-        self.executable_layers = self.build_layers_with_attaching_executable_agents(layers=layers_data)
+        self.executable_layers = self.build_layers_with_attaching_executable_agents(layers=layers_data, tools=self.tools)
 
         # 6. Execute layers sequentially with parallel sub-agents
         execution_result = await self.layer_execution_engine(executable_layers=self.executable_layers)
@@ -207,13 +207,13 @@ class MainWorkFlow:
             system_prompt (str): The system prompt defining the persona and instructions.
             task (str): The specific task assigned to this agent.
             name (str, optional): Name of the agent. Defaults to "SubAgent".
-            tools (Optional[List[Any]], optional): Tools to bind to this agent. Defaults to self.tools.
+            tools (Optional[List[Any]], optional): Tools to bind to this agent. Defaults to None (empty list).
             temperature (Optional[float], optional): Model temperature. Defaults to self.temperature.
             
         Returns:
             ExecutableSubAgent: Pydantic model instance containing agent details, initialized LLM model instance, and compiled executable agent executor.
         """
-        agent_tools = tools if tools is not None else self.tools
+        agent_tools = tools if tools is not None else []
         agent_temp = temperature if temperature is not None else self.temperature
 
         # 1. Initialize dedicated LLM model instance
@@ -359,6 +359,95 @@ class MainWorkFlow:
             layers=executable_layers_list
         )
 
+    async def run_single_agent(
+        self,
+        agent: Union[ExecutableSubAgent, Dict[str, Any]],
+        accumulated_context: Optional[str] = None
+    ) -> SubAgentExecutionResult:
+        """
+        Executes a single sub-agent using its compiled LangGraph executor.
+        
+        Args:
+            agent (Union[ExecutableSubAgent, Dict[str, Any]]): The executable sub-agent instance or config dictionary.
+            accumulated_context (Optional[str], optional): The accumulated context from previous layers.
+            
+        Returns:
+            SubAgentExecutionResult: The result of the sub-agent execution containing status, response, messages, and error if any.
+        """
+        if isinstance(agent, ExecutableSubAgent):
+            agent_name = agent.name
+            agent_task = agent.task
+            agent_model = agent.model_name
+            executor = agent.executor
+        elif isinstance(agent, dict):
+            agent_name = agent.get("name", "SubAgent")
+            agent_task = agent.get("task", "")
+            agent_model = agent.get("model_name", self.model_name)
+            executor = agent.get("executor")
+        else:
+            agent_name = getattr(agent, "name", "SubAgent")
+            agent_task = getattr(agent, "task", "")
+            agent_model = getattr(agent, "model_name", self.model_name)
+            executor = getattr(agent, "executor", None)
+
+        # Build user prompt combining agent's task with accumulated context from previous layers
+        if accumulated_context:
+            user_message = (
+                f"Assigned Task: {agent_task}\n\n"
+                f"Context & Results from Previous Layer(s):\n{accumulated_context}\n\n"
+                "Please use the above context and your available tools to accomplish your task."
+            )
+        else:
+            user_message = f"Assigned Task: {agent_task}"
+
+        print(f"\n   🚀 [STARTING SUB-AGENT]: {agent_name}")
+        print(f"      ├─ Model: {agent_model}")
+        print(f"      └─ Task: {agent_task}")
+
+        try:
+            res = await executor.ainvoke({"messages": [("user", user_message)]})
+            
+            # Extract last response content and tool call messages
+            messages = res.get("messages", []) if isinstance(res, dict) else []
+            final_content = messages[-1].content if messages else ""
+
+            # Inspect and log any tool calls made during execution
+            tool_calls_made = []
+            for msg in messages:
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", str(tc))
+                        tool_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                        tool_calls_made.append(f"{tool_name}({json.dumps(tool_args, ensure_ascii=False)})")
+
+            print(f"\n   ✅ [COMPLETED SUB-AGENT]: {agent_name}")
+            if tool_calls_made:
+                print(f"      ├─ 🔧 Tools Invoked ({len(tool_calls_made)}):")
+                for tc_str in tool_calls_made:
+                    print(f"      │   └─ {tc_str}")
+            print("      └─ 📝 Output Summary:")
+            for line in str(final_content).strip().split("\n"):
+                print(f"         {line}")
+
+            return SubAgentExecutionResult(
+                name=agent_name,
+                task=agent_task,
+                status="success",
+                response=str(final_content),
+                messages=messages
+            )
+        except Exception as e:
+            print(f"\n   ❌ [FAILED SUB-AGENT]: {agent_name}")
+            print(f"      └─ Error: {str(e)}")
+            return SubAgentExecutionResult(
+                name=agent_name,
+                task=agent_task,
+                status="error",
+                error=str(e),
+                response=f"Error executing task: {str(e)}",
+                messages=[]
+            )
+
     async def layer_execution_engine(
         self,
         executable_layers: Optional[Union[ExecutableLayers, Dict[str, Any], List[Any]]] = None,
@@ -432,84 +521,9 @@ class MainWorkFlow:
                     print(f"   │ {line}")
                 print("   " + "─" * 70)
 
-            async def _run_single_agent(agent: Union[ExecutableSubAgent, Dict[str, Any]]) -> SubAgentExecutionResult:
-                if isinstance(agent, ExecutableSubAgent):
-                    agent_name = agent.name
-                    agent_task = agent.task
-                    agent_model = agent.model_name
-                    executor = agent.executor
-                elif isinstance(agent, dict):
-                    agent_name = agent.get("name", "SubAgent")
-                    agent_task = agent.get("task", "")
-                    agent_model = agent.get("model_name", self.model_name)
-                    executor = agent.get("executor")
-                else:
-                    agent_name = getattr(agent, "name", "SubAgent")
-                    agent_task = getattr(agent, "task", "")
-                    agent_model = getattr(agent, "model_name", self.model_name)
-                    executor = getattr(agent, "executor", None)
-
-                # Build user prompt combining agent's task with accumulated context from previous layers
-                if accumulated_context:
-                    user_message = (
-                        f"Assigned Task: {agent_task}\n\n"
-                        f"Context & Results from Previous Layer(s):\n{accumulated_context}\n\n"
-                        "Please use the above context and your available tools to accomplish your task."
-                    )
-                else:
-                    user_message = f"Assigned Task: {agent_task}"
-
-                print(f"\n   🚀 [STARTING SUB-AGENT]: {agent_name}")
-                print(f"      ├─ Model: {agent_model}")
-                print(f"      └─ Task: {agent_task}")
-
-                try:
-                    res = await executor.ainvoke({"messages": [("user", user_message)]})
-                    
-                    # Extract last response content and tool call messages
-                    messages = res.get("messages", []) if isinstance(res, dict) else []
-                    final_content = messages[-1].content if messages else ""
-
-                    # Inspect and log any tool calls made during execution
-                    tool_calls_made = []
-                    for msg in messages:
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            for tc in msg.tool_calls:
-                                tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", str(tc))
-                                tool_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-                                tool_calls_made.append(f"{tool_name}({json.dumps(tool_args, ensure_ascii=False)})")
-
-                    print(f"\n   ✅ [COMPLETED SUB-AGENT]: {agent_name}")
-                    if tool_calls_made:
-                        print(f"      ├─ 🔧 Tools Invoked ({len(tool_calls_made)}):")
-                        for tc_str in tool_calls_made:
-                            print(f"      │   └─ {tc_str}")
-                    print("      └─ 📝 Output Summary:")
-                    for line in str(final_content).strip().split("\n"):
-                        print(f"         {line}")
-
-                    return SubAgentExecutionResult(
-                        name=agent_name,
-                        task=agent_task,
-                        status="success",
-                        response=str(final_content),
-                        messages=messages
-                    )
-                except Exception as e:
-                    print(f"\n   ❌ [FAILED SUB-AGENT]: {agent_name}")
-                    print(f"      └─ Error: {str(e)}")
-                    return SubAgentExecutionResult(
-                        name=agent_name,
-                        task=agent_task,
-                        status="error",
-                        error=str(e),
-                        response=f"Error executing task: {str(e)}",
-                        messages=[]
-                    )
-
             # Run all sub-agents in this layer in parallel
             layer_results: List[SubAgentExecutionResult] = await asyncio.gather(
-                *[_run_single_agent(agent) for agent in sub_agents]
+                *[self.run_single_agent(agent, accumulated_context) for agent in sub_agents]
             )
 
             # 3. Format and accumulate this layer's output to feed into next layer
