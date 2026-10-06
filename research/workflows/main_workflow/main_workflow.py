@@ -461,17 +461,12 @@ class MainWorkFlow:
             agent_name = agent.get("name", "SubAgent")
             agent_task = agent.get("task", "")
             agent_model = agent.get("model_name", self.model_name)
-            agent_tools = agent.get("tools", [])
             executor = agent.get("executor")
         else:
             agent_name = getattr(agent, "name", "SubAgent")
             agent_task = getattr(agent, "task", "")
             agent_model = getattr(agent, "model_name", self.model_name)
-            agent_tools = getattr(agent, "tools", [])
             executor = getattr(agent, "executor", None)
-
-        if isinstance(agent, ExecutableSubAgent):
-            agent_tools = agent.tools
 
         # Build user prompt combining agent's task with accumulated context from previous layers
         if accumulated_context:
@@ -489,8 +484,7 @@ class MainWorkFlow:
         WorkflowLogger.log_subagent_start(
             agent_name=agent_name,
             agent_model=agent_model,
-            agent_task=agent_task,
-            tools=agent_tools
+            agent_task=agent_task
         )
 
         try:
@@ -506,8 +500,7 @@ class MainWorkFlow:
             WorkflowLogger.log_subagent_completed(
                 agent_name=agent_name,
                 messages=messages,
-                final_content=final_content,
-                task=agent_task
+                final_content=final_content
             )
 
             return SubAgentExecutionResult(
@@ -521,11 +514,7 @@ class MainWorkFlow:
             # ---------------------------------------------------------------------
             # [LOGGING] Sub-Agent Execution Failed
             # ---------------------------------------------------------------------
-            WorkflowLogger.log_subagent_failed(
-                agent_name=agent_name,
-                error=e,
-                task=agent_task
-            )
+            WorkflowLogger.log_subagent_failed(agent_name=agent_name, error=e)
 
             return SubAgentExecutionResult(
                 name=agent_name,
@@ -606,11 +595,7 @@ class MainWorkFlow:
             # ---------------------------------------------------------------------
             # [LOGGING] Layer Execution Starting
             # ---------------------------------------------------------------------
-            WorkflowLogger.log_layer_start(
-                layer_num=layer_num,
-                sub_agent_count=len(sub_agents),
-                sub_agents=sub_agents
-            )
+            WorkflowLogger.log_layer_start(layer_num=layer_num, sub_agent_count=len(sub_agents))
 
             # Run all sub-agents in this layer in parallel
             layer_results: List[SubAgentExecutionResult] = await asyncio.gather(
@@ -642,11 +627,7 @@ class MainWorkFlow:
             # ---------------------------------------------------------------------
             # [LOGGING] Layer Execution Completed
             # ---------------------------------------------------------------------
-            WorkflowLogger.log_layer_complete(
-                layer_num=layer_num,
-                layer_results=layer_results,
-                result_count=len(layer_results)
-            )
+            WorkflowLogger.log_layer_complete(layer_num=layer_num, result_count=len(layer_results))
 
         # -------------------------------------------------------------------------
         # [LOGGING] All Layers Completed Successfully

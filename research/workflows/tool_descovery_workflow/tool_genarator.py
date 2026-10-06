@@ -1,10 +1,11 @@
 import re
-import time
 import urllib.parse
+import time
 from typing import Any, Dict, Tuple, Type
 import requests
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
+
 from research.workflows.main_workflow.workflow_logger import WorkflowLogger
 
 
@@ -134,7 +135,8 @@ def _send_http_request(
     query_params: Dict[str, Any],
     body_params: Dict[str, Any],
     header_params: Dict[str, Any],
-    tool_name: str = "dynamic_tool"
+    tool_title: str = "dynamic_api_tool",
+    all_kwargs: Dict[str, Any] = None
 ) -> str:
     """Executes the HTTP request with properly routed query, body, and header parameters."""
     req_headers = dict(base_headers)
@@ -153,8 +155,11 @@ def _send_http_request(
                 req_headers["Content-Type"] = "application/json"
             json_data = body_params if body_params else None
 
+    # -------------------------------------------------------------------------
+    # [LOGGING] Dynamic API Tool Execution Started
+    # -------------------------------------------------------------------------
     WorkflowLogger.log_tool_executing(
-        tool_name=tool_name,
+        tool_name=tool_title,
         http_method=http_method,
         url=url,
         params=params,
@@ -162,7 +167,7 @@ def _send_http_request(
         headers=req_headers
     )
 
-    start_time = time.time()
+    start_time = time.perf_counter()
     response = None
     try:
         response = requests.request(
@@ -174,45 +179,56 @@ def _send_http_request(
             data=form_data,
             timeout=10
         )
-        elapsed_ms = (time.time() - start_time) * 1000
+        duration_ms = (time.perf_counter() - start_time) * 1000
         response.raise_for_status()
-
+        output = response.text
+        # ---------------------------------------------------------------------
+        # [LOGGING] Dynamic API Tool Executed Successfully
+        # ---------------------------------------------------------------------
         WorkflowLogger.log_tool_executed(
-            tool_name=tool_name,
+            tool_name=tool_title,
             http_method=http_method,
             url=url,
             status_code=response.status_code,
-            elapsed_ms=elapsed_ms,
-            response_preview=response.text[:350],
+            elapsed_ms=duration_ms,
+            response_preview=output,
             is_error=False
         )
-        return response.text
+        return output
     except requests.exceptions.HTTPError as http_err:
-        elapsed_ms = (time.time() - start_time) * 1000
-        status_code = response.status_code if response is not None else 500
-        err_details = response.text if response is not None else str(http_err)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        err_details = response.text if response is not None else ""
+        err_msg = f"Error executing tool ({http_err}): {err_details}"
+        status_code = response.status_code if response is not None else None
+        # ---------------------------------------------------------------------
+        # [LOGGING] Dynamic API Tool Execution Failed (HTTP Error)
+        # ---------------------------------------------------------------------
         WorkflowLogger.log_tool_executed(
-            tool_name=tool_name,
+            tool_name=tool_title,
             http_method=http_method,
             url=url,
             status_code=status_code,
-            elapsed_ms=elapsed_ms,
-            response_preview=err_details[:350],
+            elapsed_ms=duration_ms,
+            response_preview=err_msg,
             is_error=True
         )
-        return f"Error executing tool ({http_err}): {err_details}"
+        return err_msg
     except Exception as e:
-        elapsed_ms = (time.time() - start_time) * 1000
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        err_msg = f"Error executing tool: {e}"
+        # ---------------------------------------------------------------------
+        # [LOGGING] Dynamic API Tool Execution Failed (Exception)
+        # ---------------------------------------------------------------------
         WorkflowLogger.log_tool_executed(
-            tool_name=tool_name,
+            tool_name=tool_title,
             http_method=http_method,
             url=url,
             status_code=None,
-            elapsed_ms=elapsed_ms,
-            response_preview=str(e)[:350],
+            elapsed_ms=duration_ms,
+            response_preview=err_msg,
             is_error=True
         )
-        return f"Error executing tool: {e}"
+        return err_msg
 
 
 def create_dynamic_api_tool(tool_dict: Dict[str, Any]) -> StructuredTool:
@@ -242,7 +258,20 @@ def create_dynamic_api_tool(tool_dict: Dict[str, Any]) -> StructuredTool:
         try:
             final_url = _format_url_placeholders(api_url, path_params, kwargs)
         except ValueError as val_err:
-            return f"Error executing tool: {val_err}"
+            err_msg = f"Error executing tool: {val_err}"
+            # -----------------------------------------------------------------
+            # [LOGGING] Tool Placeholder Formatting Error
+            # -----------------------------------------------------------------
+            WorkflowLogger.log_tool_executed(
+                tool_name=tool_title,
+                http_method=http_method,
+                url=api_url,
+                status_code=None,
+                elapsed_ms=0.0,
+                response_preview=err_msg,
+                is_error=True
+            )
+            return err_msg
 
         return _send_http_request(
             http_method=http_method,
@@ -251,7 +280,8 @@ def create_dynamic_api_tool(tool_dict: Dict[str, Any]) -> StructuredTool:
             query_params=query_params,
             body_params=body_params,
             header_params=header_params,
-            tool_name=tool_title
+            tool_title=tool_title,
+            all_kwargs=kwargs
         )
 
     # 3. Create and return StructuredTool

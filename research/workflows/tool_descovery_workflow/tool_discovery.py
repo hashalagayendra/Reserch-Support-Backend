@@ -149,9 +149,13 @@ class ToolDiscoveryWorkflow:
         try:
             result = chain.invoke({"task": task})
             queries = result.search_queries
-        except Exception:
+        except Exception as e:
+            WorkflowLogger.log_warning(f"Failed to parse structured output in analyze_task: {e}. Using raw task as query.")
             queries = [task]
-
+            
+        # -------------------------------------------------------------------------
+        # [LOGGING] Task Breakdown & Generated Search Queries
+        # -------------------------------------------------------------------------
         WorkflowLogger.log_tool_discovery_analysis(task=task, queries=queries)
         return {"search_queries": queries}
 
@@ -160,14 +164,23 @@ class ToolDiscoveryWorkflow:
         queries = state.get("search_queries", [])
         found_tools = []
         seen_titles = set()
-
+        query_details = []
+        
         for query in queries:
             query_vector = self.embeddings.embed_query(query)
+            
+            # Get top 2 closest matches per query using db_client
             if self.db_client:
                 tools = self.db_client.search_tools(query_vector=query_vector, limit=2)
             else:
                 tools = []
-
+                
+            query_details.append({
+                "query": query,
+                "vector_dim": len(query_vector),
+                "matches": len(tools)
+            })
+            
             if tools:
                 for t in tools:
                     tool_title = t.get("tool_title")
@@ -181,37 +194,49 @@ class ToolDiscoveryWorkflow:
                             "http_method": t.get("http_method"),
                             "headers": t.get("headers")
                         })
-
-        WorkflowLogger.log_tool_discovery_db_search(queries=queries, tools_found=found_tools)
+            
+        # -------------------------------------------------------------------------
+        # [LOGGING] Vector Database Search Matches & Query Details
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_tool_discovery_db_search(
+            queries=queries,
+            tools_found=found_tools,
+            query_details=query_details
+        )
         return {"local_tools_found": found_tools}
 
     def node_evaluate_tools(self, state: ToolDiscoveryState):
         """Uses LLM to evaluate if the found local tools are sufficient to complete the task."""
         task = state.get("task", "")
         local_tools = state.get("local_tools_found", [])
+        
         tools_desc = "\n".join([f"- {t['tool_title']}: {t['description']}" for t in local_tools]) if local_tools else "No local tools found."
-
+        
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a tool evaluator. You will be given a task and a list of available tools. Determine if the provided tools are completely sufficient to accomplish the task. If not, list the GENERIC missing capabilities needed. Avoid including specific data like locations or names in the capability description (e.g., ask for a 'General Weather API' instead of 'Tools to look up weather in Sri Lanka')."),
             ("user", "Task: {task}\n\nAvailable Tools:\n{tools}")
         ])
-
+        
         chain = prompt | self.llm.with_structured_output(ToolEvaluation)
         try:
             result = chain.invoke({"task": task, "tools": tools_desc})
             is_sufficient = result.is_sufficient
             missing = result.missing_capabilities
-        except Exception:
+        except Exception as e:
+            WorkflowLogger.log_warning(f"Failed to parse structured output in evaluate_tools: {e}.")
             is_sufficient = False
             missing = ["Unknown missing capabilities"]
-
+            
+        # -------------------------------------------------------------------------
+        # [LOGGING] Tool Sufficiency Evaluation
+        # -------------------------------------------------------------------------
         WorkflowLogger.log_tool_discovery_evaluation(is_sufficient=is_sufficient, missing_capabilities=missing)
         return {"is_sufficient": is_sufficient, "missing_capabilities": missing}
 
     def node_web_search(self, state: ToolDiscoveryState):
         """Searches the web for specifically missing capabilities and extracts an API definition."""
         from duckduckgo_search import DDGS
-
+        
         missing = state.get("missing_capabilities", [])
         web_tools = []
         for capability in missing:
@@ -219,7 +244,17 @@ class ToolDiscoveryWorkflow:
             try:
                 results = DDGS().text(query, max_results=10)
                 search_text = "\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nURL: {r.get('href')}\n" for r in results])
-
+                
+                # -----------------------------------------------------------------
+                # [LOGGING] DuckDuckGo Web Search Query & Raw Results Preview
+                # -----------------------------------------------------------------
+                WorkflowLogger.log_tool_discovery_web_search(
+                    capability=capability,
+                    query=query,
+                    results_count=len(results),
+                    preview_snippet=search_text[:600]
+                )
+                
                 prompt = ChatPromptTemplate.from_messages([
                     ("system", "You are an API extraction assistant. Your job is to extract a runnable, public API definition from the given search results that matches the user's capability requirement.\n"
                                "CRITICAL REQUIREMENTS:\n"
@@ -233,10 +268,10 @@ class ToolDiscoveryWorkflow:
                                "5. Always return a valid JSON API definition."),
                     ("user", "Capability required: {capability}\n\nSearch Results:\n{search_results}")
                 ])
-
+                
                 chain = prompt | self.llm.with_structured_output(APIToolDefinition)
                 api_def = chain.invoke({"capability": capability, "search_results": search_text})
-
+                
                 tool_dict = {
                     "tool_title": api_def.tool_title,
                     "description": api_def.description,
@@ -246,66 +281,86 @@ class ToolDiscoveryWorkflow:
                     "headers": api_def.headers,
                     "test_arguments": api_def.test_arguments
                 }
-                WorkflowLogger.log_tool_discovery_web_extracted(capability=capability, tool_def=tool_dict)
+                
+                # -----------------------------------------------------------------
+                # [LOGGING] Extracted Free Public API Definition
+                # -----------------------------------------------------------------
+                WorkflowLogger.log_tool_discovery_web_extracted(
+                    capability=capability,
+                    tool_def=tool_dict
+                )
+                
                 web_tools.append(tool_dict)
-
             except Exception as e:
-                WorkflowLogger.log_warning(f"Failed to find or parse API for '{capability}': {e}")
-
+                WorkflowLogger.log_warning(f"Failed to find or parse API for capability '{capability}': {e}")
+                
         return {"web_tools_found": web_tools}
 
     def node_test_tool(self, state: ToolDiscoveryState):
         """Simulates testing the newly discovered web tools by creating a runnable tool and executing it."""
         from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
-
+        
         web_tools = state.get("web_tools_found", [])
         tested = []
         for wt in web_tools:
             tool_title = wt.get("tool_title", "Unknown")
             mock_args = dict(wt.get("test_arguments") or {})
-            test_result = ""
-            passed = False
+            arg_schema = wt.get("argument") or {}
+            
             try:
+                # 1. Create the actual runnable tool!
                 runnable_tool = create_dynamic_api_tool(wt)
-                arg_schema = wt.get("argument") or {}
-
+                
+                # If the tool requires arguments but no test_arguments were generated, raise an exception
                 if arg_schema and not mock_args:
-                    raise ValueError(f"No test arguments generated for tool '{tool_title}'")
+                    raise ValueError(f"No test arguments generated for tool '{tool_title}' with argument schema: {list(arg_schema.keys())}")
 
-                test_res = runnable_tool.invoke(mock_args)
-                test_result = str(test_res)
-
-                if test_result.startswith("Error executing tool"):
+                # 2. Execute the tool with test arguments
+                test_result = runnable_tool.invoke(mock_args)
+                
+                if isinstance(test_result, str) and test_result.startswith("Error executing tool"):
                     raise Exception(test_result)
-
-                passed = True
+                
                 wt["tested_and_passed"] = True
+                # -----------------------------------------------------------------
+                # [LOGGING] Discovered Tool Test Passed
+                # -----------------------------------------------------------------
+                WorkflowLogger.log_tool_discovery_test(
+                    tool_title=tool_title,
+                    test_args=mock_args,
+                    passed=True,
+                    result_preview=str(test_result)
+                )
             except Exception as e:
-                test_result = str(e)
                 wt["tested_and_passed"] = False
-
-            WorkflowLogger.log_tool_discovery_test(
-                tool_title=tool_title,
-                test_args=mock_args,
-                passed=passed,
-                result_preview=test_result
-            )
+                # -----------------------------------------------------------------
+                # [LOGGING] Discovered Tool Test Failed
+                # -----------------------------------------------------------------
+                WorkflowLogger.log_tool_discovery_test(
+                    tool_title=tool_title,
+                    test_args=mock_args,
+                    passed=False,
+                    result_preview=str(e)
+                )
+                
             tested.append(wt)
-
+            
         return {"tested_tools": tested}
 
     def node_store_tool(self, state: ToolDiscoveryState):
         """Stores the successfully tested tools into the local database."""
         tested_tools = state.get("tested_tools", [])
+        
         if not self.db_client:
-            WorkflowLogger.log_tool_discovery_stored(stored_count=0)
+            WorkflowLogger.log_warning("[DB] No db_client provided, skipping DB store.")
             return {}
-
+            
         stored_count = 0
         for tt in tested_tools:
             if tt.get("tested_and_passed"):
                 try:
                     vector = self.embeddings.embed_query(tt["description"])
+                    # Using hardcoded project_id=1 as a dummy for now
                     tool_data = {
                         "project_id": 1,
                         "tool_title": tt["tool_title"],
@@ -319,8 +374,11 @@ class ToolDiscoveryWorkflow:
                     self.db_client.store_tool(tool_data)
                     stored_count += 1
                 except Exception as e:
-                    WorkflowLogger.log_warning(f"Error storing tool {tt.get('tool_title')}: {e}")
-
+                    WorkflowLogger.log_warning(f"Error storing tool '{tt.get('tool_title')}': {e}")
+                    
+        # -------------------------------------------------------------------------
+        # [LOGGING] Caching Validated Tools to Vector Database
+        # -------------------------------------------------------------------------
         WorkflowLogger.log_tool_discovery_stored(stored_count=stored_count)
         return {}
 
@@ -329,22 +387,30 @@ class ToolDiscoveryWorkflow:
         local = state.get("local_tools_found", [])
         new_tools = state.get("tested_tools", [])
         is_sufficient = state.get("is_sufficient")
-
+        
         msg = f"Task Analysis Complete. Local Tools Sufficient: {is_sufficient}\n\n"
+        
         if local:
             msg += "(From Local Database)\n"
             for t in local:
                 msg += f"- {t['tool_title']}: {t['description']}\n"
-
+        
         if new_tools:
             msg += "\n(Newly Discovered & Tested from Web)\n"
             for t in new_tools:
                 msg += f"- {t['tool_title']}: {t['description']}\n"
-
+                
+        # -------------------------------------------------------------------------
+        # [LOGGING] Tool Discovery Final Answer Synthesis
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_tool_discovery_final(final_answer=msg)
         return {"final_answer": msg}
 
     async def tool_discovery_workflow_run(self, task: str):
         """Helper method to run the workflow with a complex task."""
+        # -------------------------------------------------------------------------
+        # [LOGGING] Tool Discovery Workflow Started
+        # -------------------------------------------------------------------------
         WorkflowLogger.log_tool_discovery_start(task=task)
         initial_state = {
             "task": task, 
@@ -356,14 +422,14 @@ class ToolDiscoveryWorkflow:
             "tested_tools": [],
             "final_answer": ""
         }
+        # Run the custom graph
         response = await self.workflow.ainvoke(initial_state)
-
-        local_tools = response.get("local_tools_found", [])
-        web_passed_tools = [
-            t for t in response.get("tested_tools", [])
-            if t.get("tested_and_passed")
-        ]
-        all_ready_tools = local_tools + web_passed_tools
-        WorkflowLogger.log_tool_discovery_complete(tools_found=all_ready_tools)
-
+        
+        local_tools = response.get("local_tools_found") or []
+        tested_tools = [t for t in (response.get("tested_tools") or []) if t.get("tested_and_passed")]
+        all_ready = local_tools + tested_tools
+        # -------------------------------------------------------------------------
+        # [LOGGING] Tool Discovery Workflow Complete Summary
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_tool_discovery_complete(tools_found=all_ready)
         return response

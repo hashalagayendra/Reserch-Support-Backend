@@ -5,8 +5,9 @@ Provides visual, rich-formatted terminal logging for:
 - Orchestrator planning & tool discovery workflows
 - Layer-by-layer sub-agent topology and bindings
 - Dynamic API tool requests, responses, HTTP status, and latency (ms)
-- Sub-agent execution steps, tool invocations, and formatted output cards
-- Layer execution tables with status badges and final synthesized responses
+- Sub-agent execution steps, tool invocations, and raw output cards
+- Layer execution rules, status badges, and final synthesized responses
+Uses the 'rich' library to render boxes, trees, tables, syntax-highlighted JSON, and colored status badges.
 """
 
 import sys
@@ -34,7 +35,7 @@ console = Console()
 
 
 class WorkflowLogger:
-    """Centralized visual terminal logger for the entire workflow execution lifecycle."""
+    """Centralized visual logger for the entire workflow execution lifecycle."""
 
     # =========================================================================
     # 1. ORCHESTRATOR PLANNING LOGS
@@ -48,7 +49,7 @@ class WorkflowLogger:
             Panel(
                 f"[bold white]{task}[/bold white]",
                 title="[bold yellow]🎯 TASK ORCHESTRATOR PLANNING[/bold yellow]",
-                subtitle="[dim]Analyzing requirements & dividing task into sequential layers[/dim]",
+                subtitle="[dim]Dividing task into sequential layers & parallel agents[/dim]",
                 border_style="yellow",
                 box=box.ROUNDED,
                 padding=(1, 2),
@@ -62,7 +63,7 @@ class WorkflowLogger:
         result: Any,
         orchestrator_res: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Visual display of tool calls made and structured plan table or syntax JSON."""
+        """Visual display of tool calls made, structured plan table, and raw JSON result."""
         # 1. Log any tool calls made by the orchestrator (e.g. tool_discovery_workflow)
         if orchestrator_res:
             messages = orchestrator_res.get("messages", [])
@@ -82,14 +83,15 @@ class WorkflowLogger:
                     show_header=True,
                     header_style="bold cyan"
                 )
-                table.add_column("Discovered Tool / Workflow", style="bold yellow", width=28)
-                table.add_column("Arguments Sent", style="white")
+                table.add_column("Tool Name", style="bold yellow", width=30)
+                table.add_column("Arguments (Raw)", style="white")
                 for name, args in tool_calls_made:
-                    table.add_row(name, json.dumps(args, ensure_ascii=False))
+                    arg_str = json.dumps(args, ensure_ascii=False) if isinstance(args, dict) else str(args)
+                    table.add_row(name, arg_str)
                 console.print(table)
                 console.print()
 
-        # 2. Try to render a structured Plan Table if 'layers' is present
+        # 2. Render structured Plan Table if 'layers' is present
         layers = []
         if isinstance(result, dict):
             layers = result.get("layers", [])
@@ -98,18 +100,17 @@ class WorkflowLogger:
 
         if layers:
             plan_table = Table(
-                title=f"📋 Execution Plan Topology: \"{task[:55]}...\"",
+                title=f"📋 Task Orchestration Plan: \"{task[:60]}\"",
                 border_style="green",
                 box=box.ROUNDED,
                 show_lines=True,
-                header_style="bold green",
-                expand=True
+                header_style="bold green"
             )
             plan_table.add_column("Layer", style="bold yellow", justify="center", width=8)
-            plan_table.add_column("Sub-Agent", style="bold cyan", width=22)
+            plan_table.add_column("Sub-Agent", style="bold cyan", width=24)
             plan_table.add_column("Model", style="magenta", width=26)
             plan_table.add_column("Assigned Task", style="white")
-            plan_table.add_column("Tools Bound", style="bright_blue", width=22)
+            plan_table.add_column("Tools", style="bright_blue", width=20)
 
             for layer in layers:
                 if isinstance(layer, dict):
@@ -148,21 +149,31 @@ class WorkflowLogger:
 
             console.print(plan_table)
             console.print()
-        else:
-            try:
-                json_str = json.dumps(result, indent=2, ensure_ascii=False)
-                syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
-                console.print(
-                    Panel(
-                        syntax,
-                        title="[bold green]🎯 Task Orchestrator Result (JSON)[/bold green]",
-                        border_style="green",
-                        box=box.ROUNDED,
-                        padding=(1, 2),
-                    )
+
+        # 3. Always show the full raw JSON result syntax-highlighted
+        try:
+            json_str = json.dumps(result, indent=2, ensure_ascii=False)
+            syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
+            console.print(
+                Panel(
+                    syntax,
+                    title=f"[bold green]🎯 Task Orchestrator Raw Result (JSON): \"{task[:60]}\"[/bold green]",
+                    subtitle="[dim]Raw Structured Output[/dim]",
+                    border_style="green",
+                    box=box.ROUNDED,
+                    padding=(1, 2),
                 )
-            except Exception:
-                console.print(Panel(str(result), title="[bold green]Orchestrator Result[/bold green]", border_style="green"))
+            )
+        except Exception:
+            console.print(
+                Panel(
+                    str(result),
+                    title="[bold green]🎯 Task Orchestrator Raw Result[/bold green]",
+                    border_style="green",
+                    box=box.ROUNDED
+                )
+            )
+        console.print()
 
     # =========================================================================
     # 2. ARCHITECTURE TOPOLOGY LOGS
@@ -170,8 +181,8 @@ class WorkflowLogger:
 
     @classmethod
     def log_executable_layers(cls, executable_layers_list: List[Any]) -> None:
-        """Visual tree diagram of generated executable layers and sub-agents."""
-        tree = Tree(f"[bold cyan]🚀 Compiled Multi-Agent Architecture ({len(executable_layers_list)} Layers)[/bold cyan]")
+        """Visual tree diagram of generated executable layers and sub-agents with raw details."""
+        tree = Tree(f"[bold cyan]🚀 Executable Multi-Agent Architecture ({len(executable_layers_list)} Layers)[/bold cyan]")
         for layer in executable_layers_list:
             layer_num = getattr(layer, "layer_number", "?")
             sub_agents = getattr(layer, "sub_agents", [])
@@ -181,13 +192,16 @@ class WorkflowLogger:
                 tool_names = [t.name for t in agent_tools if hasattr(t, "name")]
                 tools_str = ", ".join(tool_names) if tool_names else "[dim]None[/dim]"
                 is_ready = getattr(agent, "executor", None) is not None
-                status = "[green]Ready ✅[/green]" if is_ready else "[red]Failed ❌[/red]"
+                status = "[green]Ready (Compiled Agent) ✅[/green]" if is_ready else "[red]Failed ❌[/red]"
+                sys_prompt = getattr(agent, "system_prompt", "")
 
                 agent_node = layer_branch.add(
                     f"[bold green]Agent #{idx}: {getattr(agent, 'name', 'SubAgent')}[/bold green] "
                     f"[dim]({getattr(agent, 'model_name', 'N/A')})[/dim] - {status}"
                 )
                 agent_node.add(f"[bold white]Task:[/bold white] {getattr(agent, 'task', 'N/A')}")
+                if sys_prompt:
+                    agent_node.add(f"[bold cyan]System Prompt:[/bold cyan] [dim]{sys_prompt.strip()}[/dim]")
                 agent_node.add(f"[bold blue]Available Tools ({len(tool_names)}):[/bold blue] {tools_str}")
 
         console.print(
@@ -206,90 +220,22 @@ class WorkflowLogger:
     # =========================================================================
 
     @classmethod
-    def log_layer_start(
-        cls,
-        layer_num: int,
-        sub_agent_count: Optional[int] = None,
-        sub_agents: Optional[List[Any]] = None
-    ) -> None:
-        """Visual divider and table for execution layer start."""
-        agents = sub_agents or []
-        count = len(agents) if agents else (sub_agent_count or 0)
-
+    def log_layer_start(cls, layer_num: int, sub_agent_count: int) -> None:
+        """Visual divider rule for layer execution start."""
         console.print()
         console.rule(
-            f"[bold yellow]▶️  STARTING LAYER {layer_num} ({count} Parallel Sub-Agents)[/bold yellow]",
+            f"[bold yellow]▶️  [EXECUTING LAYER {layer_num}] - {sub_agent_count} Sub-Agent(s) Running in Parallel[/bold yellow]",
             style="yellow",
         )
-        if agents:
-            queue_table = Table(
-                title=f"Parallel Execution Queue (Layer {layer_num})",
-                box=box.SIMPLE_HEAVY,
-                border_style="yellow",
-                header_style="bold yellow",
-                show_header=True,
-                expand=True
-            )
-            queue_table.add_column("Agent Name", style="bold cyan", width=22)
-            queue_table.add_column("Assigned Task", style="white")
-            queue_table.add_column("Tools Ready", style="bright_blue", width=22)
-
-            for ag in agents:
-                name = getattr(ag, "name", "SubAgent") if not isinstance(ag, dict) else ag.get("name", "SubAgent")
-                task = getattr(ag, "task", "") if not isinstance(ag, dict) else ag.get("task", "")
-                tools = getattr(ag, "tools", []) if not isinstance(ag, dict) else ag.get("tools", [])
-                t_names = [t.name for t in tools if hasattr(t, "name")] if tools else []
-                queue_table.add_row(name, task, ", ".join(t_names) if t_names else "[dim]None[/dim]")
-
-            console.print(queue_table)
         console.print()
 
     @classmethod
-    def log_layer_complete(
-        cls,
-        layer_num: int,
-        layer_results: Optional[List[Any]] = None,
-        result_count: Optional[int] = None
-    ) -> None:
-        """Visual table summary of all sub-agents in a completed layer."""
-        results = layer_results or []
-        if results:
-            success_count = sum(1 for r in results if getattr(r, "status", "") == "success")
-            error_count = len(results) - success_count
-
-            summary_table = Table(
-                title=f"📦 Layer {layer_num} Completed Summary ({len(results)} Agents)",
-                border_style="bright_blue",
-                box=box.ROUNDED,
-                header_style="bold bright_blue",
-                show_header=True,
-                expand=True
-            )
-            summary_table.add_column("Sub-Agent", style="bold cyan", width=20)
-            summary_table.add_column("Status", justify="center", width=14)
-            summary_table.add_column("Task", style="dim", max_width=34)
-            summary_table.add_column("Output Preview", style="white")
-
-            for r in results:
-                name = getattr(r, "name", "SubAgent")
-                status = getattr(r, "status", "unknown")
-                task = getattr(r, "task", "")
-                resp = str(getattr(r, "response", "")).strip()
-                preview = resp[:100] + "..." if len(resp) > 100 else resp
-                status_tag = "[green]SUCCESS ✅[/green]" if status == "success" else "[red]ERROR ❌[/red]"
-                summary_table.add_row(name, status_tag, task[:26] + "..." if len(task) > 26 else task, preview)
-
-            console.print(summary_table)
-            console.print(
-                f"   [dim]↳ Layer {layer_num} Total: [bold green]{success_count} succeeded[/bold green], "
-                f"[bold red]{error_count} failed[/bold red][/dim]\n"
-            )
-        else:
-            count = result_count if result_count is not None else 0
-            console.print(
-                f"📦 [bold green]Layer {layer_num} Complete[/bold green] "
-                f"[dim]({count} Sub-Agent result(s) recorded)[/dim]\n"
-            )
+    def log_layer_complete(cls, layer_num: int, result_count: int) -> None:
+        """Visual badge for layer completion."""
+        console.print(
+            f"📦 [bold green][LAYER {layer_num} COMPLETE][/bold green] - "
+            f"[dim]{result_count} Sub-Agent Result(s) Recorded[/dim]\n"
+        )
 
     @classmethod
     def log_all_layers_complete(cls, total_layers: int) -> None:
@@ -306,34 +252,12 @@ class WorkflowLogger:
     # =========================================================================
 
     @classmethod
-    def log_subagent_start(
-        cls,
-        agent_name: str,
-        agent_model: str,
-        agent_task: str,
-        tools: Optional[List[Any]] = None
-    ) -> None:
-        """Visual card for starting a sub-agent."""
-        tools_names = []
-        if tools:
-            for t in tools:
-                if isinstance(t, str):
-                    tools_names.append(t)
-                elif hasattr(t, "name"):
-                    tools_names.append(t.name)
-                elif isinstance(t, dict):
-                    tools_names.append(t.get("tool_title", "tool"))
-        tools_display = ", ".join(tools_names) if tools_names else "[dim]None[/dim]"
-
-        body = (
-            f"[bold cyan]Task:[/bold cyan] {agent_task}\n"
-            f"[bold magenta]Model:[/bold magenta] {agent_model}\n"
-            f"[bold blue]Available Tools:[/bold blue] {tools_display}"
-        )
+    def log_subagent_start(cls, agent_name: str, agent_model: str, agent_task: str) -> None:
+        """Visual box for starting a sub-agent."""
         console.print(
             Panel(
-                body,
-                title=f"[bold green]🤖 Executing Sub-Agent: [underline]{agent_name}[/underline][/bold green]",
+                f"[bold white]Task:[/bold white] {agent_task}\n[bold white]Model:[/bold white] [dim]{agent_model}[/dim]",
+                title=f"[bold cyan]🚀 [STARTING SUB-AGENT]: [underline]{agent_name}[/underline][/bold cyan]",
                 border_style="cyan",
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -345,10 +269,9 @@ class WorkflowLogger:
         cls,
         agent_name: str,
         messages: List[Any],
-        final_content: Any,
-        task: Optional[str] = None
+        final_content: Any
     ) -> None:
-        """Visual card for completed sub-agent output and summary of tools used."""
+        """Visual box for completed sub-agent output and tools used."""
         tool_calls_made = []
         for msg in messages:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -363,27 +286,21 @@ class WorkflowLogger:
                 border_style="magenta",
                 box=box.ROUNDED,
                 show_header=True,
-                header_style="bold magenta",
-                expand=True
+                header_style="bold magenta"
             )
-            table.add_column("Tool", style="bold magenta", width=25)
-            table.add_column("Arguments", style="dim")
+            table.add_column("Tool Name", style="bold magenta", width=25)
+            table.add_column("Arguments (Raw)", style="dim")
             for t_name, t_args in tool_calls_made:
-                table.add_row(t_name, json.dumps(t_args, ensure_ascii=False))
+                arg_repr = json.dumps(t_args, ensure_ascii=False) if isinstance(t_args, dict) else str(t_args)
+                table.add_row(t_name, arg_repr)
             console.print(table)
 
         content_str = str(final_content).strip()
-        card_parts = []
-        if task:
-            card_parts.append(f"[bold cyan]Task:[/bold cyan] {task}")
-        if tool_calls_made:
-            card_parts.append(f"[bold magenta]Tools Used:[/bold magenta] {', '.join([t[0] for t in tool_calls_made])}")
-        card_parts.append(f"\n[bold green]── Output ──────────────────────────────────────────────────────────[/bold green]\n{content_str if content_str else '[dim]No text generated[/dim]'}")
-
         console.print(
             Panel(
-                "\n".join(card_parts),
-                title=f"[bold green]✅ Agent Completed: {agent_name}[/bold green]",
+                content_str if content_str else "[dim]No content generated[/dim]",
+                title=f"[bold green]✅ [COMPLETED SUB-AGENT]: {agent_name}[/bold green]",
+                subtitle="[dim]📝 Output Summary (Raw Content)[/dim]",
                 border_style="green",
                 box=box.ROUNDED,
                 padding=(1, 2),
@@ -392,22 +309,12 @@ class WorkflowLogger:
         console.print()
 
     @classmethod
-    def log_subagent_failed(
-        cls,
-        agent_name: str,
-        error: Any,
-        task: Optional[str] = None
-    ) -> None:
-        """Visual card for sub-agent execution failure."""
-        body = ""
-        if task:
-            body += f"[bold white]Task:[/bold white] {task}\n\n"
-        body += f"[bold red]Error Details:[/bold red]\n{error}"
-
+    def log_subagent_failed(cls, agent_name: str, error: Any) -> None:
+        """Visual box for sub-agent execution error."""
         console.print(
             Panel(
-                body,
-                title=f"[bold red]❌ Agent Failed: {agent_name}[/bold red]",
+                f"[bold red]Error: {error}[/bold red]",
+                title=f"[bold red]❌ [FAILED SUB-AGENT]: {agent_name}[/bold red]",
                 border_style="red",
                 box=box.ROUNDED,
                 padding=(1, 2),
@@ -434,14 +341,16 @@ class WorkflowLogger:
             f"[{method_color}]{http_method.upper()}[/{method_color}] [underline cyan]{url}[/underline cyan]"
         ]
         if params:
-            req_lines.append(f"[bold yellow]Query Params:[/bold yellow] [dim]{json.dumps(params, ensure_ascii=False)}[/dim]")
+            req_lines.append(f"[bold yellow]Query Params (Raw):[/bold yellow] [dim]{json.dumps(params, ensure_ascii=False)}[/dim]")
         if body:
-            req_lines.append(f"[bold magenta]Body/Payload:[/bold magenta] [dim]{json.dumps(body, ensure_ascii=False)}[/dim]")
+            req_lines.append(f"[bold magenta]Body/Payload (Raw):[/bold magenta] [dim]{json.dumps(body, ensure_ascii=False)}[/dim]")
+        if headers:
+            req_lines.append(f"[bold cyan]Headers (Raw):[/bold cyan] [dim]{json.dumps(headers, ensure_ascii=False)}[/dim]")
 
         console.print(
             Panel(
                 "\n".join(req_lines),
-                title=f"[bold bright_magenta]🔧 Tool Dispatched: {tool_name}[/bold bright_magenta]",
+                title=f"[bold bright_magenta]🔧 [EXECUTE] Dynamic Tool Request: {tool_name}[/bold bright_magenta]",
                 border_style="bright_magenta",
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -465,12 +374,9 @@ class WorkflowLogger:
         latency_label = f"[dim cyan]{elapsed_ms:.1f}ms[/dim cyan]"
 
         preview = response_preview.strip()
-        if len(preview) > 350:
-            preview = preview[:350] + "\n... [dim](truncated preview)[/dim]"
-
         resp_content = (
-            f"[bold white]Status:[/bold white] {status_label} | [bold white]Latency:[/bold white] {latency_label}\n"
-            f"[dim]{preview}[/dim]"
+            f"[bold white]Status:[/bold white] {status_label} | [bold white]Latency:[/bold white] {latency_label}\n\n"
+            f"[bold white]Raw Response:[/bold white]\n[dim]{preview}[/dim]"
         )
         border_style = "green" if not is_error else "red"
 
@@ -493,8 +399,17 @@ class WorkflowLogger:
         """Visual banner for starting the tool discovery workflow."""
         console.print()
         console.rule(
-            f"[bold magenta]🔍 TOOL DISCOVERY WORKFLOW: \"{task[:60]}\"[/bold magenta]",
+            "[bold magenta]🔍 === Starting Tool Discovery Workflow ===[/bold magenta]",
             style="magenta",
+        )
+        console.print(
+            Panel(
+                f"[bold white]Target Task:[/bold white] {task}",
+                title="🔍 Tool Discovery Goal",
+                border_style="magenta",
+                box=box.ROUNDED,
+                padding=(0, 2),
+            )
         )
         console.print()
 
@@ -504,13 +419,13 @@ class WorkflowLogger:
         query_items = "\n".join([f"  [bold cyan]•[/bold cyan] [white]{q}[/white]" for q in queries]) if queries else "  [dim]None[/dim]"
         body = (
             f"[bold yellow]Analyzed Task:[/bold yellow] [white]{task}[/white]\n\n"
-            f"[bold green]Generic Capability Queries ({len(queries)}):[/bold green]\n"
+            f"[bold green]Generated Generic Queries ({len(queries)}):[/bold green]\n"
             f"{query_items}"
         )
         console.print(
             Panel(
                 body,
-                title="[bold magenta]🔍 [Node: analyze_task] Task Breakdown[/bold magenta]",
+                title="[bold magenta]🔍 [Node: analyze_task] Task Breakdown & Capabilities[/bold magenta]",
                 border_style="magenta",
                 box=box.ROUNDED,
                 padding=(0, 2),
@@ -518,38 +433,92 @@ class WorkflowLogger:
         )
 
     @classmethod
-    def log_tool_discovery_db_search(cls, queries: List[str], tools_found: List[Dict[str, Any]]) -> None:
+    def log_tool_discovery_db_search(
+        cls,
+        queries: List[str],
+        tools_found: List[Dict[str, Any]],
+        query_details: Optional[List[Dict[str, Any]]] = None
+    ) -> None:
         """Visual table or card for vector database search results."""
+        details_text = ""
+        if query_details:
+            lines = []
+            for qd in query_details:
+                q = qd.get("query", "")
+                v_dim = qd.get("vector_dim", 0)
+                m_count = qd.get("matches", 0)
+                lines.append(f"  • Query: [cyan]'{q}'[/cyan] | Vector Dim: [green]{v_dim}[/green] | Matches in DB: [yellow]{m_count}[/yellow]")
+            details_text = "\n".join(lines)
+
         if tools_found:
+            if details_text:
+                console.print(
+                    Panel(
+                        details_text,
+                        title="🗄️ Vector Database Query Breakdown",
+                        border_style="cyan",
+                        box=box.ROUNDED,
+                        padding=(0, 2)
+                    )
+                )
+
             table = Table(
                 title=f"🗄️ [Node: explore_db] Local Database Matches ({len(tools_found)} Found)",
                 border_style="cyan",
                 box=box.ROUNDED,
                 header_style="bold cyan",
-                show_header=True,
-                expand=True
+                show_header=True
             )
             table.add_column("Tool Title", style="bold cyan", width=22)
             table.add_column("Method", justify="center", width=8)
-            table.add_column("Description", style="white")
+            table.add_column("Endpoint URL", style="white")
+            table.add_column("Description", style="dim")
 
             for t in tools_found:
                 title = t.get("tool_title", "tool")
                 method = t.get("http_method", "GET")
+                url = t.get("api_url", "")
                 desc = t.get("description", "")
-                table.add_row(title, method, desc[:70] + "..." if len(desc) > 70 else desc)
+                table.add_row(title, method, url, desc)
 
             console.print(table)
         else:
+            q_info = f"\n\n[bold white]Queries searched ({len(queries)}):[/bold white]\n{details_text}" if details_text else f"\n\n[bold white]Queries searched:[/bold white] {queries}"
             console.print(
                 Panel(
-                    f"[dim yellow]Searched {len(queries)} query vector(s) in local database. No matching existing tools found.[/dim yellow]",
+                    f"[yellow]No matching existing tools found in local vector DB.[/yellow]{q_info}",
                     title="🗄️ [Node: explore_db] Local Database Search",
                     border_style="dim yellow",
                     box=box.ROUNDED,
                     padding=(0, 2),
                 )
             )
+
+    @classmethod
+    def log_tool_discovery_web_search(
+        cls,
+        capability: str,
+        query: str,
+        results_count: int,
+        preview_snippet: str
+    ) -> None:
+        """Visual card for web search query and raw result snippets."""
+        body = (
+            f"[bold magenta]Missing Capability:[/bold magenta] [white]{capability}[/white]\n"
+            f"[bold cyan]Web Query:[/bold cyan] [underline]{query}[/underline]\n"
+            f"[bold green]DuckDuckGo Results Returned:[/bold green] [bold white]{results_count}[/bold white]\n\n"
+            f"[bold yellow]--- Search Results Preview (Raw) ---[/bold yellow]\n"
+            f"[dim]{preview_snippet.strip()}[/dim]"
+        )
+        console.print(
+            Panel(
+                body,
+                title="🌐 [Node: web_search] DuckDuckGo API Search",
+                border_style="cyan",
+                box=box.ROUNDED,
+                padding=(0, 2),
+            )
+        )
 
     @classmethod
     def log_tool_discovery_evaluation(cls, is_sufficient: bool, missing_capabilities: List[str]) -> None:
@@ -582,6 +551,7 @@ class WorkflowLogger:
         url = tool_def.get("api_url", "")
         desc = tool_def.get("description", "")
         args = tool_def.get("argument", {})
+        headers = tool_def.get("headers", {})
         test_args = tool_def.get("test_arguments", {})
 
         body = (
@@ -589,7 +559,8 @@ class WorkflowLogger:
             f"[bold cyan]Tool Name:[/bold cyan] [bold white]{tool_title}[/bold white]\n"
             f"[bold green]Endpoint:[/bold green] [{ 'bold green' if method == 'GET' else 'bold blue' }]{method}[/] [underline]{url}[/underline]\n"
             f"[bold white]Description:[/bold white] [dim]{desc}[/dim]\n"
-            f"[bold yellow]Arguments Schema:[/bold yellow] [dim]{json.dumps(args, ensure_ascii=False)}[/dim]\n"
+            f"[bold yellow]Arguments Schema (Raw):[/bold yellow] [dim]{json.dumps(args, ensure_ascii=False)}[/dim]\n"
+            f"[bold cyan]Headers (Raw):[/bold cyan] [dim]{json.dumps(headers, ensure_ascii=False)}[/dim]\n"
             f"[bold blue]Sample Test Args:[/bold blue] [dim]{json.dumps(test_args, ensure_ascii=False)}[/dim]"
         )
         console.print(
@@ -614,20 +585,16 @@ class WorkflowLogger:
         status_tag = "[bold green]PASSED ✅[/bold green]" if passed else "[bold red]FAILED ❌[/bold red]"
         border = "green" if passed else "red"
 
-        preview = result_preview.strip()
-        if len(preview) > 250:
-            preview = preview[:250] + "..."
-
         body = (
             f"[bold white]Test Status:[/bold white] {status_tag}\n"
-            f"[bold cyan]Test Arguments:[/bold cyan] [dim]{json.dumps(test_args, ensure_ascii=False)}[/dim]\n"
-            f"[bold white]Execution Output:[/bold white]\n[dim]{preview}[/dim]"
+            f"[bold cyan]Test Arguments (Raw):[/bold cyan] [dim]{json.dumps(test_args, ensure_ascii=False)}[/dim]\n"
+            f"[bold white]Execution Output (Raw):[/bold white]\n[dim]{result_preview.strip()}[/dim]"
         )
         console.print(
             Panel(
                 body,
                 title=f"🧪 [Node: test_tool] Validation: [underline]{tool_title}[/underline]",
-                border_style={True: "green", False: "red"}[passed],
+                border_style=border,
                 box=box.ROUNDED,
                 padding=(0, 2),
             )
@@ -639,7 +606,7 @@ class WorkflowLogger:
         if stored_count > 0:
             console.print(
                 Panel(
-                    f"[bold green]Successfully indexed and stored {stored_count} validated tool(s) into PostgreSQL Vector DB.[/bold green]",
+                    f"[bold green]Successfully saved {stored_count} tools to DB.[/bold green]",
                     title="💾 [Node: store_tool] Database Caching",
                     border_style="green",
                     box=box.ROUNDED,
@@ -658,27 +625,18 @@ class WorkflowLogger:
             )
 
     @classmethod
-    def log_tool_discovery_node(
-        cls,
-        node_name: str,
-        description: str,
-        details: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Visual node step in tool discovery (generic fallback)."""
-        lines = [f"[bold cyan]{description}[/bold cyan]"]
-        if details:
-            for k, v in details.items():
-                lines.append(f"  [bold yellow]{k}:[/bold yellow] [white]{v}[/white]")
-
+    def log_tool_discovery_final(cls, final_answer: str) -> None:
+        """Visual panel for tool discovery final synthesis."""
         console.print(
             Panel(
-                "\n".join(lines),
-                title=f"[bold bright_magenta]Node: [{node_name}][/bold bright_magenta]",
-                border_style="magenta",
+                str(final_answer).strip(),
+                title="🎯 [Node: final_answer] Tool Discovery Synthesis",
+                border_style="gold1",
                 box=box.ROUNDED,
-                padding=(0, 2),
+                padding=(1, 2),
             )
         )
+        console.print()
 
     @classmethod
     def log_tool_discovery_complete(cls, tools_found: List[Dict[str, Any]]) -> None:
@@ -690,8 +648,7 @@ class WorkflowLogger:
                 border_style="bright_green",
                 box=box.ROUNDED,
                 header_style="bold bright_green",
-                show_header=True,
-                expand=True
+                show_header=True
             )
             table.add_column("Tool Title", style="bold cyan", width=24)
             table.add_column("Method", justify="center", width=8)
@@ -716,11 +673,11 @@ class WorkflowLogger:
 
     @classmethod
     def log_final_response(cls, final_response: str) -> None:
-        """Visual highlight panel for the final workflow synthesized response."""
+        """Visual highlight panel for the final workflow response."""
         console.print(
             Panel(
                 str(final_response).strip(),
-                title="[bold gold1]🌟 FINAL SYNTHESIZED WORKFLOW RESPONSE[/bold gold1]",
+                title="[bold gold1]🎯 FINAL SYNTHESIZED WORKFLOW RESPONSE[/bold gold1]",
                 border_style="gold1",
                 box=box.ROUNDED,
                 padding=(1, 2),
