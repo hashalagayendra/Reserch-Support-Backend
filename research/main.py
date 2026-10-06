@@ -67,6 +67,7 @@ class Research:
         )
         
         self.main_workflow = MainWorkFlow(
+            tool_discovery_workflow = self.tool_discovery_workflow,
             api_key=self.openRouterAPIKey,
             model_name=self.mainWorkflowModel,
             temperature=self.mainWorkflowModelTemperature

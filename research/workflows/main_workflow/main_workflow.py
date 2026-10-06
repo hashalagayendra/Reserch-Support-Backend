@@ -8,12 +8,14 @@ from langgraph.prebuilt import create_react_agent
 from langchain_openrouter import ChatOpenRouter
 from app.core.client_side_test_config import settings
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
+from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
 from research.workflows.main_workflow.utility import (
     get_recent_models,
     get_each_model_details,
     get_design_arena_benchmarks,
     ai_tools_data,
 )
+
 
 
 # --- STRUCTURED OUTPUT MODELS ---
@@ -89,10 +91,17 @@ class ExecutionSummary(BaseModel):
 
 
 class MainWorkFlow:
-    def __init__(self, api_key: str = None, model_name: str = None, temperature: float = 0.5):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model_name: Optional[str] = None,
+        temperature: float = 0.5,
+        tool_discovery_workflow: Optional[ToolDiscoveryWorkflow] = None
+    ):
         self.api_key = api_key 
         self.model_name = model_name 
         self.temperature = temperature
+        self.tool_discovery_workflow = tool_discovery_workflow
         
         # 1. Create tools from the db/data array
         self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
@@ -515,11 +524,6 @@ class MainWorkFlow:
             print(f"▶️  [EXECUTING LAYER {layer_num}] - {len(sub_agents)} Sub-Agent(s) Running in Parallel")
             print("=" * 80)
 
-            if accumulated_context:
-                print("📥 Context fed into this layer from previous step(s):")
-                for line in accumulated_context.strip().split("\n"):
-                    print(f"   │ {line}")
-                print("   " + "─" * 70)
 
             # Run all sub-agents in this layer in parallel
             layer_results: List[SubAgentExecutionResult] = await asyncio.gather(
