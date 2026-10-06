@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 from app.core.client_side_test_config import settings
+from app.core.backend_config import backend_settings
 
 # --- STRUCTURED OUTPUT MODELS ---
 class TaskAnalysis(BaseModel):
@@ -66,7 +67,7 @@ class ToolDiscoveryWorkflow:
         api_key = openRouterAPIKey or settings.OPENROUTER_API_KEY
         model = toolDiscoveryModel or settings.TOOL_DISCOVERY_MODEL
         temp = toolDiscoveryModelTemperature if toolDiscoveryModelTemperature is not None else settings.TOOL_DISCOVERY_TEMPERATURE
-        emb_model = embeddingModel or settings.EMBEDDING_MODEL
+        emb_model = embeddingModel or backend_settings.EMBEDDING_MODEL
         
         # Initialize the LLM
         self.llm = ChatOpenRouter(
@@ -241,7 +242,7 @@ class ToolDiscoveryWorkflow:
             print(f"    Searching for: {capability}")
             query = f"{capability} open free API without API key JSON"
             try:
-                results = DDGS().text(query, max_results=5)
+                results = DDGS().text(query, max_results=10)
                 search_text = "\n".join([f"Title: {r.get('title')}\nSnippet: {r.get('body')}\nURL: {r.get('href')}\n" for r in results])
                 
                 print(f"    Analyzing search results for: {capability}")
