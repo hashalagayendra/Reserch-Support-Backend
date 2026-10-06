@@ -1,9 +1,11 @@
 import re
+import time
 import urllib.parse
 from typing import Any, Dict, Tuple, Type
 import requests
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, create_model
+from research.workflows.main_workflow.workflow_logger import WorkflowLogger
 
 
 def _map_to_python_type(type_name: Any) -> Type:
@@ -131,7 +133,8 @@ def _send_http_request(
     base_headers: Dict[str, Any],
     query_params: Dict[str, Any],
     body_params: Dict[str, Any],
-    header_params: Dict[str, Any]
+    header_params: Dict[str, Any],
+    tool_name: str = "dynamic_tool"
 ) -> str:
     """Executes the HTTP request with properly routed query, body, and header parameters."""
     req_headers = dict(base_headers)
@@ -150,9 +153,17 @@ def _send_http_request(
                 req_headers["Content-Type"] = "application/json"
             json_data = body_params if body_params else None
 
-    print(f"\n[EXECUTE] Dynamic Tool Request -> {http_method} {url}")
-    print(f"[EXECUTE] Query: {params} | Body: {json_data or form_data} | Headers: {req_headers}")
+    WorkflowLogger.log_tool_executing(
+        tool_name=tool_name,
+        http_method=http_method,
+        url=url,
+        params=params,
+        body=json_data or form_data,
+        headers=req_headers
+    )
 
+    start_time = time.time()
+    response = None
     try:
         response = requests.request(
             method=http_method,
@@ -163,12 +174,44 @@ def _send_http_request(
             data=form_data,
             timeout=10
         )
+        elapsed_ms = (time.time() - start_time) * 1000
         response.raise_for_status()
+
+        WorkflowLogger.log_tool_executed(
+            tool_name=tool_name,
+            http_method=http_method,
+            url=url,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            response_preview=response.text[:350],
+            is_error=False
+        )
         return response.text
     except requests.exceptions.HTTPError as http_err:
-        err_details = response.text if response is not None else ""
+        elapsed_ms = (time.time() - start_time) * 1000
+        status_code = response.status_code if response is not None else 500
+        err_details = response.text if response is not None else str(http_err)
+        WorkflowLogger.log_tool_executed(
+            tool_name=tool_name,
+            http_method=http_method,
+            url=url,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            response_preview=err_details[:350],
+            is_error=True
+        )
         return f"Error executing tool ({http_err}): {err_details}"
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        WorkflowLogger.log_tool_executed(
+            tool_name=tool_name,
+            http_method=http_method,
+            url=url,
+            status_code=None,
+            elapsed_ms=elapsed_ms,
+            response_preview=str(e)[:350],
+            is_error=True
+        )
         return f"Error executing tool: {e}"
 
 
@@ -207,7 +250,8 @@ def create_dynamic_api_tool(tool_dict: Dict[str, Any]) -> StructuredTool:
             base_headers=headers,
             query_params=query_params,
             body_params=body_params,
-            header_params=header_params
+            header_params=header_params,
+            tool_name=tool_title
         )
 
     # 3. Create and return StructuredTool

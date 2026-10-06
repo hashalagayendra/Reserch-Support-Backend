@@ -9,13 +9,14 @@ from langchain_openrouter import ChatOpenRouter
 from langchain_core.tools import StructuredTool
 from app.core.client_side_test_config import settings
 from research.workflows.tool_descovery_workflow.tool_genarator import create_dynamic_api_tool
-from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow
+from research.workflows.tool_descovery_workflow.tool_discovery import ToolDiscoveryWorkflow, APIToolDefinition
 from research.workflows.main_workflow.utility import (
     get_recent_models,
     get_each_model_details,
     get_design_arena_benchmarks,
     ai_tools_data,
 )
+from research.workflows.main_workflow.workflow_logger import WorkflowLogger
 
 
 
@@ -25,6 +26,10 @@ class SubAgentConfig(BaseModel):
     system_prompt: str = Field(description="System prompt defining the role, instructions, and persona of this sub-agent")
     task: str = Field(description="The specific sub-task assigned to this agent")
     model_name: str = Field(description="The LLM model name to use for this sub-agent. Must strictly be 'deepseek/deepseek-v4-flash'")
+    tools: List[APIToolDefinition] = Field(
+        default_factory=list,
+        description="List of specific API tools (APIToolDefinition) assigned to this sub-agent to accomplish its task"
+    )
 
 
 class BasicLayer(BaseModel):
@@ -123,19 +128,39 @@ class MainWorkFlow:
             api_key=self.api_key
         )
 
-        # 4. Initialize orchestrator memory store
+        # 4. Orchestrator Prompt
+        self.orchestrator_prompt = (
+            "You are a Task Orchestrator Agent. Your job is to divide the user's task into a sequential, multi-layer agentic workflow.\n"
+            "Design the workflow layer by layer: all sub-agents in a single layer execute their tasks in parallel. "
+            "Once that layer finishes, the next layer executes.\n\n"
+            "TOOL DISCOVERY & CAPABILITIES:\n"
+            "- You have access to the 'tool_discovery_workflow' tool.\n"
+            "- IF NEEDED, call the 'tool_discovery_workflow' tool with the required task or capability to find, search, test, and extract API tools.\n"
+            "- Once tools are discovered, assign suitable tools to each sub-agent that needs them.\n\n"
+            "SUB-AGENT SPECIFICATIONS:\n"
+            "- For each sub-agent, specify its name, system_prompt, task, model_name, and tools.\n"
+            "- CRITICAL REQUIREMENT 1: You MUST strictly set the model_name field to 'deepseek/deepseek-v4-flash' for every sub-agent.\n"
+            "- CRITICAL REQUIREMENT 2: In each sub-agent's 'tools' field, assign the matching APIToolDefinition objects matching the tools needed for that sub-agent. If a sub-agent does not need any tools, set its 'tools' field to an empty list []."
+        )
+
+        # 5. Initialize orchestrator memory store
         self.main_orchestrator_memory_store: List[Dict[str, Any]] = [
             {
                 "role": "system",
-                "content": "You are a Task Orchestrator Agent. Your job is to divide the user's task into a sequential, multi-layer agentic workflow.\n"
-                           "Design the workflow layer by layer: all sub-agents in a single layer execute their tasks in parallel. "
-                           "Once that layer finishes, the next layer executes.\n"
-                           "For each sub-agent, specify its name, system_prompt, task, and model_name.\n"
-                           "CRITICAL REQUIREMENT: You MUST strictly set the model_name field to 'deepseek/deepseek-v4-flash' for every sub-agent."
+                "content": self.orchestrator_prompt
             }
         ]
 
-        # 5. Create agent & layers container
+        # 6. Create main orchestrator agent connected directly with tool_discovery_tool
+        self.orchestrator_agent = create_react_agent(
+            model=self.mainAgent,
+            tools=[self.tool_discovery_tool] if self.tool_discovery_tool else [],
+            prompt=self.orchestrator_prompt,
+            response_format=TaskDivisionResult,
+            name="MainOrchestratorAgent"
+        )
+
+        # 7. Create agent & layers container
         self.executable_layers: Optional[ExecutableLayers] = None
         self.agent_executor = create_react_agent(self.llm, tools=self.tools)
 
@@ -156,7 +181,11 @@ class MainWorkFlow:
 
         return StructuredTool.from_function(
             name="tool_discovery_workflow",
-            description="Executes the Tool Discovery Workflow for a task and returns the complete tool discovery workflow state.",
+            description=(
+                "Discovers, searches, tests, and evaluates API tools for a given task or capability. "
+                "Call this tool if you need external APIs or tools to accomplish a task. "
+                "Returns the discovered tool details (tool_title, description, argument, api_url, http_method, headers)."
+            ),
             coroutine=_run_tool_discovery,
         )
 
@@ -179,44 +208,58 @@ class MainWorkFlow:
         Main Orchestrator Node.
         Analyzes the user's main task and divides it into a multi-layered agentic workflow (layers executed sequentially, sub-agents within each layer executed in parallel),
         returning structured layer configurations adhering to TaskDivisionResult.
+        The orchestrator is connected with tool_discovery_workflow as a tool; if needed, it calls the tool autonomously to discover tools and assigns them to sub-agents.
         
         Args:
             state (Union[Dict[str, Any], str]): The workflow state dict containing 'task' or the raw task string.
         """
         task = state if isinstance(state, str) else state.get("task", "")
-        
-        # 1. Append task as user prompt to main_orchestrator_memory_store
+
+        # -------------------------------------------------------------------------
+        # [LOGGING] Workflow Planning Started
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_orchestrator_start(task)
+
+        # 1. Append task to main_orchestrator_memory_store
+        user_message = f"User Task: {task}"
         self.main_orchestrator_memory_store.append({
             "role": "user",
-            "content": f"User Task: {task}"
+            "content": user_message
         })
 
-        # 2. Invoke LLM with structured output directly at call time
-        structured_agent = self.mainAgent.with_structured_output(TaskDivisionResult)
-        raw_result = await structured_agent.ainvoke(self.main_orchestrator_memory_store)
-        result = raw_result.model_dump() if hasattr(raw_result, "model_dump") else raw_result
+        # 2. Invoke orchestrator agent (with tool discovery capability)
+        orchestrator_res = await self.orchestrator_agent.ainvoke({
+            "messages": [("user", user_message)]
+        })
 
-        # 3. Easy-to-read JSON console logging
-        print("\n" + "=" * 70)
-        print(f"🎯 TASK ORCHESTRATOR RESULT (JSON): \"{task}\"")
-        print("=" * 70)
-        try:
-            print(json.dumps(result, indent=2, ensure_ascii=False))
-        except Exception:
-            print(result)
-        print("=" * 70 + "\n")
+        # Extract structured response adhering to TaskDivisionResult
+        structured_response = orchestrator_res.get("structured_response")
+        if isinstance(structured_response, TaskDivisionResult):
+            result = structured_response.model_dump()
+        elif isinstance(structured_response, dict):
+            result = structured_response
+        else:
+            # Fallback if structured_response is not directly present
+            structured_agent = self.mainAgent.with_structured_output(TaskDivisionResult)
+            raw_result = await structured_agent.ainvoke(orchestrator_res.get("messages", []))
+            result = raw_result.model_dump() if hasattr(raw_result, "model_dump") else raw_result
 
-        # 4. Append response to main_orchestrator_memory_store
+        # -------------------------------------------------------------------------
+        # [LOGGING] Log Orchestrator Result & Discovered Tool Calls
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_orchestrator_result(task=task, result=result, orchestrator_res=orchestrator_res)
+
+        # 3. Append response to memory store
         self.main_orchestrator_memory_store.append({
             "role": "assistant",
             "content": json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
         })
 
-        # 5. Extract only necessary layers data and build executable agent layers
+        # 4. Build executable agent layers
         layers_data = result.get("layers", []) if isinstance(result, dict) else getattr(result, "layers", [])
-        self.executable_layers = self.build_layers_with_attaching_executable_agents(layers=layers_data, tools=self.tools)
+        self.executable_layers = self.build_layers_with_attaching_executable_agents(layers=layers_data)
 
-        # 6. Execute layers sequentially with parallel sub-agents
+        # 5. Execute layers sequentially with parallel sub-agents
         execution_result = await self.layer_execution_engine(executable_layers=self.executable_layers)
 
         return {
@@ -235,13 +278,14 @@ class MainWorkFlow:
     ) -> ExecutableSubAgent:
         """
         Creates an executable LangChain/LangGraph agent by sending model_name, system_prompt, and task.
+        Dynamically generates executable tools using create_dynamic_api_tool for each APIToolDefinition or tool dictionary.
         
         Args:
             model_name (str): The LLM model name (e.g. 'deepseek/deepseek-v4-flash').
             system_prompt (str): The system prompt defining the persona and instructions.
             task (str): The specific task assigned to this agent.
             name (str, optional): Name of the agent. Defaults to "SubAgent".
-            tools (Optional[List[Any]], optional): Tools to bind to this agent. Defaults to None (empty list).
+            tools (Optional[List[Any]], optional): Tools or APIToolDefinition items to bind to this agent. Defaults to None (empty list).
             temperature (Optional[float], optional): Model temperature. Defaults to self.temperature.
             
         Returns:
@@ -250,14 +294,24 @@ class MainWorkFlow:
         agent_tools = tools if tools is not None else []
         agent_temp = temperature if temperature is not None else self.temperature
 
-        # 1. Initialize dedicated LLM model instance
+        # 1. Convert APIToolDefinition instances or tool dictionaries into executable tools using create_dynamic_api_tool
+        executable_agent_tools: List[Any] = []
+        for t in agent_tools:
+            if isinstance(t, APIToolDefinition):
+                executable_agent_tools.append(create_dynamic_api_tool(t.model_dump()))
+            elif isinstance(t, dict):
+                executable_agent_tools.append(create_dynamic_api_tool(t))
+            else:
+                executable_agent_tools.append(t)
+
+        # 2. Initialize dedicated LLM model instance
         sub_agent_llm = ChatOpenRouter(
             model=model_name,
             temperature=agent_temp,
             api_key=self.api_key
         )
 
-        # 2. Build structured prompt combining system prompt and assigned task
+        # 3. Build structured prompt combining system prompt and assigned task
         agent_prompt_template = PromptTemplate(
             template=(
                 "You are an AI Sub-Agent with the following instructions and role:\n"
@@ -274,10 +328,10 @@ class MainWorkFlow:
             task=task.strip()
         )
 
-        # 3. Generate executable React agent with tools and formatted prompt
+        # 4. Generate executable React agent with dynamic API tools and formatted prompt
         agent_executor = create_react_agent(
             model=sub_agent_llm,
-            tools=agent_tools,
+            tools=executable_agent_tools,
             prompt=formatted_prompt,
             name=name
         )
@@ -288,7 +342,7 @@ class MainWorkFlow:
             task=task,
             model_name=model_name,
             llm=sub_agent_llm,
-            tools=agent_tools,
+            tools=executable_agent_tools,
             executor=agent_executor
         )
 
@@ -311,7 +365,7 @@ class MainWorkFlow:
         Returns:
             ExecutableLayers: Layer-by-layer Pydantic model maintaining layer order and containing sub-agents with their executable agents.
         """
-        # 1. Extract only the necessary raw layers list
+        # 1. Extract raw layers list
         if isinstance(layers, TaskDivisionResult):
             raw_layers = layers.layers
         elif isinstance(layers, dict):
@@ -323,7 +377,7 @@ class MainWorkFlow:
 
         executable_layers_list: List[ExecutableLayer] = []
 
-        # 2. Iterate layer by layer
+        # 2. Build executable agents layer by layer
         for layer in raw_layers:
             if isinstance(layer, BasicLayer):
                 layer_num = layer.layer_number
@@ -344,24 +398,27 @@ class MainWorkFlow:
                     system_prompt = agent_data.system_prompt
                     task = agent_data.task
                     model_name = agent_data.model_name
+                    agent_tools = agent_data.tools
                 elif isinstance(agent_data, dict):
                     name = agent_data.get("name", "SubAgent")
                     system_prompt = agent_data.get("system_prompt", "You are a specialized sub-agent.")
                     task = agent_data.get("task", "")
                     model_name = agent_data.get("model_name") or self.model_name
+                    agent_tools = agent_data.get("tools", [])
                 else:
                     name = getattr(agent_data, "name", "SubAgent")
                     system_prompt = getattr(agent_data, "system_prompt", "You are a specialized sub-agent.")
                     task = getattr(agent_data, "task", "")
                     model_name = getattr(agent_data, "model_name", self.model_name)
+                    agent_tools = getattr(agent_data, "tools", [])
 
-                # Send data to create_single_agent function
+                # Send data to create_single_agent function with only specifically assigned tools
                 built_agent = self.create_single_agent(
                     model_name=model_name,
                     system_prompt=system_prompt,
                     task=task,
                     name=name,
-                    tools=tools,
+                    tools=agent_tools or [],
                     temperature=temperature
                 )
                 layer_executable_sub_agents.append(built_agent)
@@ -371,23 +428,10 @@ class MainWorkFlow:
                 sub_agents=layer_executable_sub_agents
             ))
 
-        # 4. Console logging of executable layers
-        print("\n" + "=" * 70)
-        print(f"🚀 EXECUTABLE LAYERS GENERATED ({len(executable_layers_list)} Layer(s))")
-        print("=" * 70)
-        for layer in executable_layers_list:
-            layer_num = layer.layer_number
-            sub_agents = layer.sub_agents
-            print(f"\n📦 [LAYER {layer_num}] - {len(sub_agents)} Parallel Sub-Agent(s):")
-            for idx, agent in enumerate(sub_agents, 1):
-                tool_names = [t.name for t in agent.tools] if agent.tools else []
-                print(f"   ├─ Agent #{idx}: {agent.name}")
-                print(f"   │  ├─ Model: {agent.model_name}")
-                print(f"   │  ├─ Task: {agent.task}")
-                print(f"   │  ├─ System Prompt: {agent.system_prompt}")
-                print(f"   │  ├─ Available Tools: {tool_names}")
-                print(f"   │  └─ Executable Status: {'Ready (Compiled Agent)' if agent.executor is not None else 'Failed'}")
-        print("\n" + "=" * 70 + "\n")
+        # -------------------------------------------------------------------------
+        # [LOGGING] Log generated executable layers tree
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_executable_layers(executable_layers_list)
 
         return ExecutableLayers(
             layers=executable_layers_list
@@ -417,12 +461,17 @@ class MainWorkFlow:
             agent_name = agent.get("name", "SubAgent")
             agent_task = agent.get("task", "")
             agent_model = agent.get("model_name", self.model_name)
+            agent_tools = agent.get("tools", [])
             executor = agent.get("executor")
         else:
             agent_name = getattr(agent, "name", "SubAgent")
             agent_task = getattr(agent, "task", "")
             agent_model = getattr(agent, "model_name", self.model_name)
+            agent_tools = getattr(agent, "tools", [])
             executor = getattr(agent, "executor", None)
+
+        if isinstance(agent, ExecutableSubAgent):
+            agent_tools = agent.tools
 
         # Build user prompt combining agent's task with accumulated context from previous layers
         if accumulated_context:
@@ -434,9 +483,15 @@ class MainWorkFlow:
         else:
             user_message = f"Assigned Task: {agent_task}"
 
-        print(f"\n   🚀 [STARTING SUB-AGENT]: {agent_name}")
-        print(f"      ├─ Model: {agent_model}")
-        print(f"      └─ Task: {agent_task}")
+        # -------------------------------------------------------------------------
+        # [LOGGING] Sub-Agent Execution Starting
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_subagent_start(
+            agent_name=agent_name,
+            agent_model=agent_model,
+            agent_task=agent_task,
+            tools=agent_tools
+        )
 
         try:
             res = await executor.ainvoke({"messages": [("user", user_message)]})
@@ -445,23 +500,15 @@ class MainWorkFlow:
             messages = res.get("messages", []) if isinstance(res, dict) else []
             final_content = messages[-1].content if messages else ""
 
-            # Inspect and log any tool calls made during execution
-            tool_calls_made = []
-            for msg in messages:
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        tool_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", str(tc))
-                        tool_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-                        tool_calls_made.append(f"{tool_name}({json.dumps(tool_args, ensure_ascii=False)})")
-
-            print(f"\n   ✅ [COMPLETED SUB-AGENT]: {agent_name}")
-            if tool_calls_made:
-                print(f"      ├─ 🔧 Tools Invoked ({len(tool_calls_made)}):")
-                for tc_str in tool_calls_made:
-                    print(f"      │   └─ {tc_str}")
-            print("      └─ 📝 Output Summary:")
-            for line in str(final_content).strip().split("\n"):
-                print(f"         {line}")
+            # ---------------------------------------------------------------------
+            # [LOGGING] Sub-Agent Execution Completed Successfully
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_subagent_completed(
+                agent_name=agent_name,
+                messages=messages,
+                final_content=final_content,
+                task=agent_task
+            )
 
             return SubAgentExecutionResult(
                 name=agent_name,
@@ -471,8 +518,15 @@ class MainWorkFlow:
                 messages=messages
             )
         except Exception as e:
-            print(f"\n   ❌ [FAILED SUB-AGENT]: {agent_name}")
-            print(f"      └─ Error: {str(e)}")
+            # ---------------------------------------------------------------------
+            # [LOGGING] Sub-Agent Execution Failed
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_subagent_failed(
+                agent_name=agent_name,
+                error=e,
+                task=agent_task
+            )
+
             return SubAgentExecutionResult(
                 name=agent_name,
                 task=agent_task,
@@ -499,17 +553,19 @@ class MainWorkFlow:
         Returns:
             Dict[str, Any]: Detailed execution summary conforming to ExecutionSummary containing layer-by-layer results, accumulated context, and the final response.
         """
-        # 1. Resolve layers container
+        # 1. Resolve executable layers container
         layers_container = executable_layers if executable_layers is not None else self.executable_layers
         if layers_container is None:
-            print("⚠️ No executable layers available to run.")
-            empty_summary = ExecutionSummary(
+            # ---------------------------------------------------------------------
+            # [LOGGING] Warning: No executable layers
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_warning("No executable layers available to run.")
+            return ExecutionSummary(
                 execution_history=[],
                 accumulated_context="",
                 final_response="No layers were executed.",
                 total_layers_executed=0
-            )
-            return empty_summary.model_dump()
+            ).model_dump()
 
         if isinstance(layers_container, ExecutableLayers):
             layers_list = layers_container.layers
@@ -521,19 +577,21 @@ class MainWorkFlow:
             layers_list = getattr(layers_container, "layers", [])
 
         if not layers_list:
-            print("⚠️ No executable layers available to run.")
-            empty_summary = ExecutionSummary(
+            # ---------------------------------------------------------------------
+            # [LOGGING] Warning: Empty layers list
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_warning("No executable layers available to run.")
+            return ExecutionSummary(
                 execution_history=[],
                 accumulated_context="",
                 final_response="No layers were executed.",
                 total_layers_executed=0
-            )
-            return empty_summary.model_dump()
+            ).model_dump()
 
         execution_history: List[LayerExecutionResult] = []
         accumulated_context = initial_context or ""
 
-        # 2. Iterate layer by layer sequentially
+        # 2. Sequential layer-by-layer execution
         for layer in layers_list:
             if isinstance(layer, ExecutableLayer):
                 layer_num = layer.layer_number
@@ -545,17 +603,21 @@ class MainWorkFlow:
                 layer_num = getattr(layer, "layer_number", len(execution_history) + 1)
                 sub_agents = getattr(layer, "sub_agents", [])
 
-            print("\n" + "=" * 80)
-            print(f"▶️  [EXECUTING LAYER {layer_num}] - {len(sub_agents)} Sub-Agent(s) Running in Parallel")
-            print("=" * 80)
-
+            # ---------------------------------------------------------------------
+            # [LOGGING] Layer Execution Starting
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_layer_start(
+                layer_num=layer_num,
+                sub_agent_count=len(sub_agents),
+                sub_agents=sub_agents
+            )
 
             # Run all sub-agents in this layer in parallel
             layer_results: List[SubAgentExecutionResult] = await asyncio.gather(
                 *[self.run_single_agent(agent, accumulated_context) for agent in sub_agents]
             )
 
-            # 3. Format and accumulate this layer's output to feed into next layer
+            # Format and accumulate this layer's output to feed into next layer
             layer_summary_parts = []
             for agent_res in layer_results:
                 layer_summary_parts.append(
@@ -577,13 +639,21 @@ class MainWorkFlow:
                 layer_summary=this_layer_summary
             ))
 
-            print(f"\n📦 [LAYER {layer_num} COMPLETE] - {len(layer_results)} Sub-Agent Result(s) Recorded")
+            # ---------------------------------------------------------------------
+            # [LOGGING] Layer Execution Completed
+            # ---------------------------------------------------------------------
+            WorkflowLogger.log_layer_complete(
+                layer_num=layer_num,
+                layer_results=layer_results,
+                result_count=len(layer_results)
+            )
 
-        print("\n" + "=" * 80)
-        print(f"🏁 ALL {len(execution_history)} LAYER(S) EXECUTED SUCCESSFULLY")
-        print("=" * 80)
+        # -------------------------------------------------------------------------
+        # [LOGGING] All Layers Completed Successfully
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_all_layers_complete(total_layers=len(execution_history))
 
-        # Determine final response from the last layer's sub-agents
+        # 3. Determine final response from the last layer's sub-agents
         last_layer_agents = execution_history[-1].sub_agent_results if execution_history else []
         final_response = (
             last_layer_agents[-1].response
@@ -591,12 +661,12 @@ class MainWorkFlow:
             else ""
         )
 
-        print("\n" + "🌟" * 40)
-        print("🎯 FINAL SYNTHESIZED WORKFLOW RESPONSE:")
-        print("🌟" * 40)
-        print(final_response)
-        print("🌟" * 40 + "\n")
+        # -------------------------------------------------------------------------
+        # [LOGGING] Final Synthesized Response
+        # -------------------------------------------------------------------------
+        WorkflowLogger.log_final_response(final_response)
 
+        # 4. Construct final execution summary
         summary = ExecutionSummary(
             execution_history=execution_history,
             accumulated_context=accumulated_context,
