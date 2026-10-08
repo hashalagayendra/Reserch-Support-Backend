@@ -525,7 +525,9 @@ class MainWorkFlow:
         WorkflowLogger.log_subagent_start(
             agent_name=agent_name,
             agent_model=agent_model,
-            agent_task=agent_task
+            agent_task=agent_task,
+            layer_number=layer_number,
+            accumulated_context=accumulated_context
         )
 
         try:

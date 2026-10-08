@@ -252,13 +252,90 @@ class WorkflowLogger:
     # =========================================================================
 
     @classmethod
-    def log_subagent_start(cls, agent_name: str, agent_model: str, agent_task: str) -> None:
-        """Visual box for starting a sub-agent."""
+    def log_subagent_start(
+        cls,
+        agent_name: str,
+        agent_model: str,
+        agent_task: str,
+        layer_number: Optional[int] = None,
+        accumulated_context: Optional[str] = None
+    ) -> None:
+        """Visual box for starting a sub-agent with layer number and layered feed context."""
+        layer_badge = f" [Layer {layer_number}]" if layer_number is not None else ""
+        content_lines = [
+            f"[bold white]Task:[/bold white] {agent_task}",
+            f"[bold white]Model:[/bold white] [dim]{agent_model}[/dim]"
+        ]
+
+        # Render layered context feed details if previous layer outputs were injected
+        if accumulated_context and accumulated_context.strip():
+            content_lines.append("")
+            content_lines.append("[bold yellow]📥 Layered Feed (Injected from Prior Layers):[/bold yellow]")
+            for line in accumulated_context.strip().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("[Layer ") and stripped.endswith("]"):
+                    content_lines.append(f"  [bold cyan]📂 {stripped}[/bold cyan]")
+                elif stripped.startswith("Agent:"):
+                    agent_val = stripped[len("Agent:"):].strip()
+                    content_lines.append(f"    [bold green]🤖 Agent:[/bold green] [white]{agent_val}[/white]")
+                elif stripped.startswith("Task:"):
+                    task_val = stripped[len("Task:"):].strip()
+                    content_lines.append(f"       [dim yellow]Task:[/dim yellow] [dim]{task_val}[/dim]")
+                elif stripped.startswith("Output:"):
+                    out_val = stripped[len("Output:"):].strip()
+                    preview = (out_val[:120] + "...") if len(out_val) > 120 else out_val
+                    content_lines.append(f"       [bold bright_white]Output:[/bold bright_white] [dim cyan]{preview}[/dim cyan]")
+                elif stripped:
+                    content_lines.append(f"       [dim]{stripped}[/dim]")
+        elif layer_number == 1:
+            content_lines.append("")
+            content_lines.append("[dim italic]ℹ️ Initial Layer 1 (cold start - no prior layer outputs fed)[/dim italic]")
+
         console.print(
             Panel(
-                f"[bold white]Task:[/bold white] {agent_task}\n[bold white]Model:[/bold white] [dim]{agent_model}[/dim]",
-                title=f"[bold cyan]🚀 [STARTING SUB-AGENT]: [underline]{agent_name}[/underline][/bold cyan]",
+                "\n".join(content_lines),
+                title=f"[bold cyan]🚀 [STARTING SUB-AGENT{layer_badge}]: [underline]{agent_name}[/underline][/bold cyan]",
                 border_style="cyan",
+                box=box.ROUNDED,
+                padding=(0, 2),
+            )
+        )
+
+    @classmethod
+    def log_subagent_layered_feed(
+        cls,
+        agent_name: str,
+        layer_number: Optional[int],
+        accumulated_context: str
+    ) -> None:
+        """Visual card dedicated to inspecting the exact previous layer history fed into a sub-agent."""
+        if not accumulated_context or not accumulated_context.strip():
+            return
+
+        tree = Tree(f"📥 [bold yellow]Layered Context Feed for [cyan]{agent_name}[/cyan] (Layer {layer_number or '?'})[/bold yellow]")
+        current_layer_branch = None
+
+        for line in accumulated_context.strip().splitlines():
+            line_str = line.strip()
+            if line_str.startswith("[Layer ") and line_str.endswith("]"):
+                current_layer_branch = tree.add(f"[bold cyan]{line_str}[/bold cyan]")
+            elif current_layer_branch is not None:
+                if line_str.startswith("Agent:"):
+                    current_layer_branch.add(f"[bold green]{line_str}[/bold green]")
+                elif line_str.startswith("Output:"):
+                    out_val = line_str[len("Output:"):].strip()
+                    preview = (out_val[:140] + "...") if len(out_val) > 140 else out_val
+                    current_layer_branch.add(f"[dim cyan]Output: {preview}[/dim cyan]")
+                elif line_str.startswith("Task:"):
+                    current_layer_branch.add(f"[dim]{line_str}[/dim]")
+            else:
+                tree.add(f"[dim]{line_str}[/dim]")
+
+        console.print(
+            Panel(
+                tree,
+                title="[bold yellow]🧬 Prior Layer Context Injected[/bold yellow]",
+                border_style="yellow",
                 box=box.ROUNDED,
                 padding=(0, 2),
             )
