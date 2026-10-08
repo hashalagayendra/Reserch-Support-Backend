@@ -135,17 +135,17 @@ class MainWorkFlow:
         self.tool_discovery_workflow = tool_discovery_workflow
         
         # 1. Create tools from the db/data array
-        self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
+        # self.tools = [create_dynamic_api_tool(tool_dict) for tool_dict in ai_tools_data]
         
         # 2. Convert tool discovery workflow to executable tool returning workflow state and store in self (separate tool)
         self.tool_discovery_tool: Optional[StructuredTool] = self.create_tool_discovery_tool()
         
         # 3. Initialize LLM
-        self.llm = ChatOpenRouter(
-            model=self.model_name,
-            temperature=self.temperature,
-            api_key=self.api_key
-        )
+        # self.llm = ChatOpenRouter(
+        #     model=self.model_name,
+        #     temperature=self.temperature,
+        #     api_key=self.api_key
+        # )
         
         self.mainAgent = ChatOpenRouter(
             model=self.model_name,
@@ -160,12 +160,15 @@ class MainWorkFlow:
             "Once that layer finishes, the next layer executes.\n\n"
             "TOOL DISCOVERY & CAPABILITIES:\n"
             "- You have access to the 'tool_discovery_workflow' tool.\n"
-            "- IF NEEDED, call the 'tool_discovery_workflow' tool with the required task or capability to find, search, test, and extract API tools.\n"
-            "- Once tools are discovered, assign suitable tools to each sub-agent that needs them.\n\n"
+            "- CRITICAL RULE: Sub-agents CANNOT discover tools. If the user task requires external tools (e.g. weather, geocoding, crypto prices, search, etc.), YOU (the orchestrator) must call the 'tool_discovery_workflow' tool YOURSELF right now during planning.\n"
+            "- NEVER delegate tool discovery to any sub-agent.\n"
+            "- NEVER assign 'tool_discovery_workflow' to any sub-agent in their 'tools' list.\n"
+            "- Once tools are discovered, assign ONLY the specific discovered APIToolDefinition objects to the sub-agents that need them.\n\n"
             "SUB-AGENT SPECIFICATIONS:\n"
             "- For each sub-agent, specify its name, system_prompt, task, model_name, and tools.\n"
             "- CRITICAL REQUIREMENT 1: You MUST strictly set the model_name field to 'deepseek/deepseek-v4-flash' for every sub-agent.\n"
-            "- CRITICAL REQUIREMENT 2: In each sub-agent's 'tools' field, assign the matching APIToolDefinition objects matching the tools needed for that sub-agent. If a sub-agent does not need any tools, set its 'tools' field to an empty list []."
+            "- CRITICAL REQUIREMENT 2: In each sub-agent's 'tools' field, assign ONLY matching APIToolDefinition objects from discovered tools. If a sub-agent does not need any tools, set its 'tools' field to an empty list [].\n"
+            "- CRITICAL REQUIREMENT 3: Absolutely NEVER include 'tool_discovery_workflow' in any sub-agent's 'tools' list. It is an orchestrator-only tool."
         )
 
         # 5. Initialize orchestrator memory store
@@ -187,7 +190,7 @@ class MainWorkFlow:
 
         # 7. Create agent & layers container
         self.executable_layers: Optional[ExecutableLayers] = None
-        self.agent_executor = create_react_agent(self.llm, tools=self.tools)
+        # self.agent_executor = create_react_agent(self.llm, tools=self.tools)
 
     def create_tool_discovery_tool(
         self,
@@ -214,19 +217,19 @@ class MainWorkFlow:
             coroutine=_run_tool_discovery,
         )
 
-    async def test_tool_agent(self, prompt: str) -> dict:
-        """
-        Method to test the main workflow tool agent.
+    # async def test_tool_agent(self, prompt: str) -> dict:
+    #     """
+    #     Method to test the main workflow tool agent.
         
-        Args:-
-            prompt (str): The prompt to test the tool agent with.
-        """
-        result = await self.agent_executor.ainvoke({"messages": [("user", prompt)]})
+    #     Args:-
+    #         prompt (str): The prompt to test the tool agent with.
+    #     """
+    #     result = await self.agent_executor.ainvoke({"messages": [("user", prompt)]})
         
-        return {
-            "response": result["messages"][-1].content if result and "messages" in result else "",
-            "tools_available": [t.name for t in self.tools]
-        }
+    #     return {
+    #         "response": result["messages"][-1].content if result and "messages" in result else "",
+    #         "tools_available": [t.name for t in self.tools]
+    #     }
 
     async def main_orchestrator(self, state: Union[Dict[str, Any], str]) -> dict:
         """
