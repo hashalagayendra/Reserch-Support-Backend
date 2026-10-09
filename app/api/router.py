@@ -7,12 +7,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(projects.router, prefix="/projects", tags=["projects"])
 
 # The demos initialize AI workflows at import time; opt in for local experiments.
-if settings.ENABLE_CLIENT_TEST_ROUTES:
-    from app.api.routers.client_test import student, tool_discovery_test, main_workflow_test, openrouter_models
-
-# Include the student router under /client-test/students
-if settings.ENABLE_CLIENT_TEST_ROUTES:
-    api_router.include_router(student.router, prefix="/client-test/students", tags=["students"])
+from app.api.routers.client_test import tool_discovery_test, main_workflow_test, openrouter_models
 
 # Include the ai_tool router (kept directly under /ai-tools)
 api_router.include_router(

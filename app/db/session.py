@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.backend_config import settings
 
 database_url = make_url(settings.DATABASE_URL)
@@ -9,7 +9,8 @@ if database_url.drivername == "postgresql":
 engine = create_engine(database_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 def get_db():
     """
