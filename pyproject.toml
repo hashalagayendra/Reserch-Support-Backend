@@ -24,4 +24,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-self-evolving-workflow = { path = "../research", editable = true }
+self-evolving-workflow = { path = "../Reserch-Developer-Package", editable = true }
+
+[dependency-groups]
+dev = ["pytest>=9.0.0", "httpx>=0.28.1"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
