@@ -33,6 +33,14 @@ class User(Base, TimestampMixin):
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")
 
 
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    token_hash = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class Project(Base, TimestampMixin):
     __tablename__ = "projects"
 
