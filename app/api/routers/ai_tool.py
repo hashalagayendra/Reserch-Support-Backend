@@ -33,6 +33,8 @@ class AIToolSearchRequest(BaseModel):
 
 router = APIRouter()
 
+
+# store tool in database
 @router.post("/", response_model=AIToolResponseSchema, status_code=status.HTTP_201_CREATED)
 def create_ai_tool(
     ai_tool_in: AIToolCreateRequest, 
@@ -82,7 +84,7 @@ def create_ai_tool(
     return new_tool
 
 
-
+# search tools in db
 @router.post("/search", response_model=List[AIToolResponseSchema])
 def search_ai_tools(
     search_req: AIToolSearchRequest, 

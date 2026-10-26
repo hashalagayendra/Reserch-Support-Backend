@@ -60,20 +60,32 @@ class AgentTestRequest(BaseModel):
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Example Pydantic Response Schema ---
+class WeatherComparisonReport(BaseModel):
+    """
+    Example Pydantic structured output model.
+    Intermediate agents will produce standard string data and tool calls,
+    while the final concluding agent is configured to return this validated structure.
+    """
+    tokyo_location: str = Field(description="Geographic coordinates or location description for Tokyo")
+    tokyo_weather: str = Field(description="Current weather condition and temperature for Tokyo")
+    london_location: str = Field(description="Geographic coordinates or location description for London")
+    london_weather: str = Field(description="Current weather condition and temperature for London")
+    temperature_difference: str = Field(description="Direct comparison between Tokyo and London temperatures")
+    final_summary_and_recommendation: str = Field(description="Comprehensive comparison summary and travel/clothing advice")
+
+
 class MainOrchestratorTestRequest(BaseModel):
     task: str = Field(
         default="Find the geographic coordinates for Tokyo and London, retrieve their current weather and temperature forecasts using their coordinates, and provide a weather comparison summary.", 
         description="The task for the main orchestrator agent to divide into sub-agent workflows and execute."
-    )
-    api_key: Optional[str] = Field(
-        default=None, 
-        description="Optional OpenRouter API Key."
     )
 
 @router.post("/main-orchestrator")
 async def run_main_orchestrator(request: MainOrchestratorTestRequest):
     """
     Endpoint to execute the main orchestrator agent to divide a user task into sub-agent workflows.
+    Directly configured with WeatherComparisonReport response_schema for structured final output.
     """
     try:
         from research.main import Research
@@ -91,14 +103,16 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
             toolDiscoveryModel=tool_discovery_model,
             toolDiscoveryModelTemperature=tool_discovery_temp,
             mainWorkflowModel=main_workflow_model,
-            mainWorkflowModelTemperature=main_workflow_temp
+            mainWorkflowModelTemperature=main_workflow_temp,
+            response_schema=WeatherComparisonReport
         )
         
-        # 2. Run the main orchestrator node
-        result = await research_obj.main_workflow.main_orchestrator(request.task)
+        # 2. Run the main orchestrator node via run() or main_orchestrator()
+        result = await research_obj.run(request.task)
         
         return {
             "task": request.task,
+            "structured_output": result.get("structured_output") if isinstance(result, dict) else None,
             "result": result,
             "memory_store": research_obj.main_workflow.main_orchestrator_memory_store
         }
@@ -106,4 +120,5 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
