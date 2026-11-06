@@ -9,7 +9,7 @@ uv sync --group dev
 # Only if .env does not exist:
 Copy-Item .env.example .env
 # Configure DATABASE_URL in .env before starting.
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Use a PostgreSQL database with pgvector available. Startup creates missing tables and enables the vector extension; it does not alter existing columns or delete records. The new `user_sessions` table is additive. An explicit migration system should replace startup schema creation before production deployment.
@@ -40,6 +40,50 @@ No real credentials belong in source control. `.env` is ignored. For HTTPS produ
 ## Research demo routes
 
 The existing `/client-test/*` demo routes initialize AI workflows during import and may make paid model calls. They are disabled by default. Set `ENABLE_CLIENT_TEST_ROUTES=true` only in a configured local research environment to restore them. Portal and AI tool database routes work without OpenRouter credentials.
+
+## Separate MCP tools server
+
+The backend uses port **8000**; the MCP tools server runs independently on
+**8001**. Double-click `start-servers.bat` in the parent workspace folder to
+launch both in separate terminals. The launcher sets `MCP_SERVER_URL` for the
+launched processes without changing `.env`. Stop each server with Ctrl+C in
+its terminal. It uses Python's module entry point to avoid Windows executable
+trampoline path errors and keeps uv's cache in the workspace. To start them manually:
+
+```powershell
+cd "D:\personal project\final reserch project\mcp-simple-demo"
+uv run server.py
+```
+
+```powershell
+cd "D:\personal project\final reserch project\Reserch-Support-Backend"
+uv sync --group dev
+uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Backend `.env` settings:
+
+```dotenv
+ENABLE_CLIENT_TEST_ROUTES=true
+MCP_SERVER_URL=http://127.0.0.1:8001/mcp
+```
+
+`GET /api/v1/client-test/main-workflow-test/mcp-tools` lists the remote tool
+definitions without invoking a model or requiring a model API key.
+`POST /api/v1/client-test/main-workflow-test/main-orchestrator` passes only
+`MCP_SERVER_URL` into `Research.configure(mcp_server_url=...)`. The Research
+package owns MCP discovery and conversion: `run()` loads `Research.mcp_tools`
+before creating `MainWorkFlow`. `Research.mcp_tools` passes into `MainWorkFlow.mcp_tools`, and
+`MainWorkFlow.orchestrator_tools` binds them alongside `tool_discovery_workflow`
+to the existing main agent. Tool calls execute on the MCP server over HTTP.
+The catalog endpoint also delegates discovery to the Research package.
+The main agent can include the returned facts in sub-agent tasks; remote MCP
+tools are not serialized as API tool definitions or bound to sub-agents.
+
+If the configured MCP server cannot be reached, these routes return 503 with
+startup guidance. Set `MCP_SERVER_URL=` to explicitly disable MCP tools.
+Existing portal routes do not depend on MCP availability. Research execution
+still requires its existing OpenRouter model configuration; MCP discovery does not.
 
 ## Tests
 

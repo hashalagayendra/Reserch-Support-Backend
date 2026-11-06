@@ -1,4 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from langchain_core.tools import BaseTool
+from app.core.mcp_tools import get_mcp_tools
+from app.core.backend_config import settings as backend_settings
+from research.mcp_tools import MCPConnectionError
 from typing import Optional
 from pydantic import BaseModel, Field
 from app.core.client_side_test_config import settings
@@ -81,8 +85,22 @@ class MainOrchestratorTestRequest(BaseModel):
         description="The task for the main orchestrator agent to divide into sub-agent workflows and execute."
     )
 
+
+@router.get("/mcp-tools")
+async def list_mcp_tools(mcp_tools: list[BaseTool] = Depends(get_mcp_tools)):
+    """Inspect server tool definitions without invoking an AI model."""
+    return {"tools": [
+        {"name": tool.name, "description": tool.description,
+         "input_schema": tool.tool_call_schema if isinstance(tool.tool_call_schema, dict)
+         else tool.tool_call_schema.model_json_schema()}
+        for tool in mcp_tools
+    ]}
+
+
 @router.post("/main-orchestrator")
-async def run_main_orchestrator(request: MainOrchestratorTestRequest):
+async def run_main_orchestrator(
+    request: MainOrchestratorTestRequest,
+):
     """
     Endpoint to execute the main orchestrator agent to divide a user task into sub-agent workflows.
     Directly configured with WeatherComparisonReport response_schema for structured final output.
@@ -108,7 +126,8 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
             mainWorkflowModelTemperature=main_workflow_temp,
             errorCorrectionModel=error_correction_model,
             errorCorrectionModelTemperature=error_correction_temp,
-            response_schema=WeatherComparisonReport
+            # response_schema=WeatherComparisonReport,
+            mcp_server_url=backend_settings.MCP_SERVER_URL,
         )
         
         # 2. Run the main orchestrator node via run() or main_orchestrator()
@@ -120,6 +139,8 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
             "result": result,
             "memory_store": research_obj.main_workflow.main_orchestrator_memory_store
         }
+    except MCPConnectionError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as e:
         import traceback
         traceback.print_exc()

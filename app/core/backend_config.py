@@ -11,6 +11,7 @@ class BackendSettings(BaseSettings):
     SESSION_COOKIE_SECURE: bool = False
     SESSION_HOURS: int = Field(default=8, ge=1, le=720)
     ENABLE_CLIENT_TEST_ROUTES: bool = False
+    MCP_SERVER_URL: str = "http://127.0.0.1:8001/mcp"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
