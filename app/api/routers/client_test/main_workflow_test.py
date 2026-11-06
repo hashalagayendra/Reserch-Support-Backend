@@ -23,14 +23,14 @@ class AgentTestRequest(BaseModel):
 #     """
 #     try:
 #         from research.main import Research
-
-        
+# 
+#         
 #         key_to_use = settings.OPENROUTER_API_KEY
 #         tool_discovery_model = settings.TOOL_DISCOVERY_MODEL
 #         tool_discovery_temp = settings.TOOL_DISCOVERY_TEMPERATURE
 #         main_workflow_model = settings.MAIN_WORKFLOW_MODEL
 #         main_workflow_temp = settings.MAIN_WORKFLOW_TEMPERATURE
-        
+#         
 #         # 1. Initialize and configure Research object
 #         print(f"API Key: {key_to_use}")
 #         print(f"Tool Discovery Model: {tool_discovery_model}")
@@ -45,10 +45,10 @@ class AgentTestRequest(BaseModel):
 #             mainWorkflowModel=main_workflow_model,
 #             mainWorkflowModelTemperature=main_workflow_temp
 #         )
-        
+#         
 #         # 2. Run the agent via Research object's main_workflow
 #         result = await research_obj.main_workflow.test_tool_agent(request.prompt)
-        
+#         
 #         return {
 #             "prompt": request.prompt,
 #             "response": result["response"],
@@ -95,6 +95,8 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
         tool_discovery_temp = settings.TOOL_DISCOVERY_TEMPERATURE
         main_workflow_model = settings.MAIN_WORKFLOW_MODEL
         main_workflow_temp = settings.MAIN_WORKFLOW_TEMPERATURE
+        error_correction_model = settings.ERROR_CORRECTION_MODEL
+        error_correction_temp = settings.ERROR_CORRECTION_TEMPERATURE
         
         # 1. Initialize and configure Research object
         research_obj = Research()
@@ -104,6 +106,8 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
             toolDiscoveryModelTemperature=tool_discovery_temp,
             mainWorkflowModel=main_workflow_model,
             mainWorkflowModelTemperature=main_workflow_temp,
+            errorCorrectionModel=error_correction_model,
+            errorCorrectionModelTemperature=error_correction_temp,
             response_schema=WeatherComparisonReport
         )
         
@@ -120,5 +124,3 @@ async def run_main_orchestrator(request: MainOrchestratorTestRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
-
