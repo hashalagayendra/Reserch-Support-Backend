@@ -51,7 +51,7 @@ its terminal. It uses Python's module entry point to avoid Windows executable
 trampoline path errors and keeps uv's cache in the workspace. To start them manually:
 
 ```powershell
-cd "D:\personal project\final reserch project\mcp-simple-demo"
+cd "D:\personal project\final reserch project\Research-MCP"
 uv run server.py
 ```
 
@@ -72,25 +72,22 @@ MCP_SERVER_URL=http://127.0.0.1:8001/mcp
 definitions without invoking a model or requiring a model API key.
 `POST /api/v1/client-test/main-workflow-test/main-orchestrator` passes only
 `MCP_SERVER_URL` into `Research.configure(mcp_server_url=...)`. The Research
-package owns MCP discovery and conversion: `run()` loads `Research.mcp_tools`
-before creating `MainWorkFlow`. `Research.mcp_tools` passes into `MainWorkFlow.mcp_tools`, and
-`MainWorkFlow.orchestrator_tools` binds them alongside `tool_discovery_workflow`
-to the existing main agent. Tool calls execute on the MCP server over HTTP.
+package owns MCP discovery and conversion: `run()` loads `Research.all_mcp_tools`
+before creating `MainWorkFlow`. `Research.all_mcp_tools` passes into `MainWorkFlow.all_mcp_tools`, and
+`MainWorkFlow.orchestrator_tools` exposes only the `extract_mcp_tools` catalog
+and `tool_discovery_workflow` to the main agent. The planner assigns exact MCP
+names in each sub-agent's separate `mcp_tool_names` list. The layer builder resolves
+them and `create_single_agent` combines them with that sub-agent's API tools.
+Sub-agent MCP calls execute on the MCP server over HTTP.
 The catalog endpoint also delegates discovery to the Research package.
-The main agent can include the returned facts in sub-agent tasks; remote MCP
-tools are not serialized as API tool definitions or bound to sub-agents.
+The main agent reads definitions only; remote MCP tools execute in the assigned
+sub-agents and are not serialized as API tool definitions.
 
 If the configured MCP server cannot be reached, these routes return 503 with
 startup guidance. Set `MCP_SERVER_URL=` to explicitly disable MCP tools.
 Existing portal routes do not depend on MCP availability. Research execution
 still requires its existing OpenRouter model configuration; MCP discovery does not.
 
-## Tests
-
-```powershell
-uv run pytest -q
-```
-
-Tests use an isolated in-memory SQLite database through a FastAPI dependency override. They cover session rotation, hashing, expiry/logout, validation, origin checks, project/key isolation, SDK authentication and key revocation. They do not connect to `.env`'s database or exercise vector similarity/external AI requests.
+## Optional live check
 
 An optional live check is available with `.venv/Scripts/python.exe -m scripts.smoke_portal` after both local servers are running. It exercises the production routes against the configured PostgreSQL database inside a transaction and rolls back all test records, then checks the frontend route and API proxy. It makes no model calls and prints no secrets. This check passed against the supplied Neon configuration.

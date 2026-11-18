@@ -126,7 +126,7 @@ async def run_main_orchestrator(
             mainWorkflowModelTemperature=main_workflow_temp,
             errorCorrectionModel=error_correction_model,
             errorCorrectionModelTemperature=error_correction_temp,
-            # response_schema=WeatherComparisonReport,
+            response_schema=WeatherComparisonReport,
             mcp_server_url=backend_settings.MCP_SERVER_URL,
         )
         
