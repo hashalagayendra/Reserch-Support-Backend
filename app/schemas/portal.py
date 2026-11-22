@@ -39,5 +39,9 @@ class ApiKeyResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     project_id: int
-    key_value: str
+    key_prefix: str
     created_at: datetime
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    key_value: str

@@ -3,6 +3,7 @@ from fastapi.security.api_key import APIKeyHeader
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.db.models import ApiKey
+from app.core.security import hash_api_key
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -19,7 +20,7 @@ def get_api_key(
         )
     
     # Query the database to check if the api key exists
-    api_key = db.query(ApiKey).filter(ApiKey.key_value == api_key_header).first()
+    api_key = db.query(ApiKey).filter(ApiKey.key_value == hash_api_key(api_key_header)).first()
     
     if not api_key:
         raise HTTPException(

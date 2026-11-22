@@ -49,6 +49,11 @@ class ApiKey(Base, TimestampMixin):
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     key_value = Column(String, unique=True, index=True, nullable=False)
 
+    @property
+    def key_prefix(self):
+        # A short hash fingerprint identifies the key without revealing it.
+        return self.key_value.removeprefix("sha256:")[:10]
+
     project = relationship("Project", back_populates="api_keys")
 
 

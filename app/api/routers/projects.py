@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.api.portal_deps import get_current_user, verify_origin
 from app.db.models import ApiKey, Project, User
 from app.db.session import get_db
-from app.schemas.portal import ApiKeyResponse, ProjectCreate, ProjectResponse
+from app.schemas.portal import ApiKeyResponse, ApiKeyCreatedResponse, ProjectCreate, ProjectResponse
+from app.core.security import hash_api_key
 
 router = APIRouter()
 
@@ -46,16 +47,19 @@ def list_keys(project_id: int, response: Response, user: User = Depends(get_curr
     return db.query(ApiKey).filter_by(project_id=project_id).order_by(ApiKey.id.desc()).all()
 
 
-@router.post("/{project_id}/api-keys", response_model=ApiKeyResponse, status_code=201,
+@router.post("/{project_id}/api-keys", response_model=ApiKeyCreatedResponse, status_code=201,
              dependencies=[Depends(verify_origin)])
 def generate_key(project_id: int, response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     owned_project(project_id, user, db)
-    key = ApiKey(project_id=project_id, key_value="rk_" + secrets.token_urlsafe(32))
+    value = "rk_" + secrets.token_urlsafe(32)
+    key = ApiKey(project_id=project_id, key_value=hash_api_key(value))
     db.add(key)
     db.commit()
     db.refresh(key)
     response.headers["Cache-Control"] = "no-store"
-    return key
+    return ApiKeyCreatedResponse(id=key.id, project_id=key.project_id,
+                                 key_prefix=key.key_prefix, created_at=key.created_at,
+                                 key_value=value)
 
 
 @router.delete("/{project_id}/api-keys/{key_id}", status_code=204, dependencies=[Depends(verify_origin)])

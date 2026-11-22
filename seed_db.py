@@ -7,6 +7,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.db.session import SessionLocal, engine
 from app.db.models import Base, User, Project, AITool, ApiKey
+from app.core.security import hash_api_key
 
 def seed_database():
     # Create all tables in the database
@@ -41,12 +42,13 @@ def seed_database():
                 db.add(project)
                 db.flush()
                 # Create an API key for the project
-                new_api_key = ApiKey(project_id=project.id, key_value=f"sk-dummy-{uuid.uuid4().hex[:8]}")
+                value = "rk_" + uuid.uuid4().hex + uuid.uuid4().hex
+                new_api_key = ApiKey(project_id=project.id, key_value=hash_api_key(value))
                 db.add(new_api_key)
                 
                 db.commit()
                 db.refresh(project)
-                print(f"Created project '{project.name}' with ID: {project.id} and API Key '{new_api_key.key_value}'")
+                print(f"Created project '{project.name}' with ID: {project.id}. Copy API key now: {value}")
             else:
                 print(f"Project '{project.name}' already exists with ID: {project.id}")
             

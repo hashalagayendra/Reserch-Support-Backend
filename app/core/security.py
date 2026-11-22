@@ -11,6 +11,11 @@ from app.core.backend_config import settings
 from app.db.models import UserSession
 
 
+def hash_api_key(value: str) -> str:
+    """Hash a random application key; the prefix identifies stored hashes."""
+    return "sha256:" + hashlib.sha256(value.encode()).hexdigest()
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=131072, r=8, p=1,

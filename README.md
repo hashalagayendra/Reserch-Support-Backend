@@ -18,6 +18,18 @@ Open http://127.0.0.1:8000/docs for the live API contract. The checked-in `opena
 
 ## Portal API
 
+Application API keys are stored as SHA-256 hashes in the existing `key_value`
+column. Their full value is returned only by the creation endpoint. Key lists
+return a short hash fingerprint as `key_prefix`. No database schema change is
+needed. Before restarting an existing installation, stop the backend and run:
+
+```powershell
+uv run python -m scripts.hash_existing_api_keys
+```
+
+This updates existing plaintext keys in one transaction without changing the
+keys used by clients. Repeating the command skips already hashed keys.
+
 All routes use the `/api/v1` prefix:
 
 | Method | Path | Behavior |
