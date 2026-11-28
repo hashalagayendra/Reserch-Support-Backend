@@ -1,0 +1,45 @@
+Database tables created/verified successfully on startup.
+INFO:     127.0.0.1:1825 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:9407 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4058 - "GET /api/v1/projects/13/api-keys HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4057 - "GET /api/v1/projects/13 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:12412 - "GET /api/v1/openapi.json HTTP/1.1" 200 OK
+
+┌─────────────────────── 🎯 TASK ORCHESTRATOR PLANNING ───────────────────────┐
+│                                                                             │
+│  Find the geographic coordinates for Tokyo and London, retrieve their       │
+│  current weather and temperature forecasts using their coordinates, and     │
+│  provide a weather comparison summary.                                      │
+│                                                                             │
+└────────── Dividing task into sequential layers & parallel agents ───────────┘
+
+───────────────── 🔍 === Starting Tool Discovery Workflow === ─────────────────
+┌────────────────────────── 🔍 Tool Discovery Goal ───────────────────────────┐
+│  Target Task: Find geographic coordinates (latitude and longitude) for      │
+│  cities like Tokyo and London using a geocoding API                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────── 🔍 [Node: analyze_task] Task Breakdown & Capabilities ───────────┐
+│  Analyzed Task: Find geographic coordinates (latitude and longitude) for    │
+│  cities like Tokyo and London using a geocoding API                         │
+│                                                                             │
+│  Generated Generic Queries (4):                                             │
+│    • Geocoding API                                                          │
+│    • Forward geocoding API                                                  │
+│    • Geocoding service API                                                  │
+│    • Free geocoding API for coordinates                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+INFO:     127.0.0.1:9135 - "POST /api/v1/ai-tools/search HTTP/1.1" 200 OK
+Error searching tools via API: timed out
+Error searching tools via API: timed out
+INFO:     127.0.0.1:13291 - "POST /api/v1/ai-tools/search HTTP/1.1" 200 OK
+┌──────────────── 🗄️ [Node: explore_db] Local Database Search ────────────────┐
+│  No matching existing tools found in local vector DB.                       │
+│                                                                             │
+│  Queries searched (4):                                                      │
+│    • Query: 'Geocoding API' | Vector Dim: 1024 | Matches in DB: 0           │
+│    • Query: 'Forward geocoding API' | Vector Dim: 1024 | Matches in DB: 0   │
+│    • Query: 'Geocoding service API' | Vector Dim: 1024 | Matches in DB: 0   │
+│    • Query: 'Free geocoding API for coordinates' | Vector Dim: 1024 |       │
+│  Matches in DB: 0                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘

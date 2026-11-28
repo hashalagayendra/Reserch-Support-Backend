@@ -16,7 +16,13 @@ test_db_client = ToolDBClient(base_url=base_url, api_key=api_key)
 
 # Initialize workflow for testing individual nodes
 # We can initialize it globally here since we're just testing the pure node functions
-test_workflow = ToolDiscoveryWorkflow(db_client=test_db_client)
+test_workflow = ToolDiscoveryWorkflow(
+    openRouterAPIKey=settings.OPENROUTER_API_KEY,
+    toolDiscoveryModel=settings.TOOL_DISCOVERY_MODEL,
+    toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE,
+    embeddingModel=settings.EMBEDDING_MODEL,
+    db_client=test_db_client,
+)
 
 class ToolDiscoveryStateModel(BaseModel):
     task: str | None = Field(default="Find a tool that gets the current weather in Tokyo.")
@@ -88,7 +94,11 @@ async def run_fully_tool_discovery_workflow(request: FullDiscoveryQueryRequest):
             openRouterAPIKey=settings.OPENROUTER_API_KEY,
             toolDiscoveryModel=settings.TOOL_DISCOVERY_MODEL,
             toolDiscoveryModelTemperature=settings.TOOL_DISCOVERY_TEMPERATURE,
-            projectApiKey=settings.PROJECT_API_KEY
+            mainWorkflowModel=settings.MAIN_WORKFLOW_MODEL,
+            mainWorkflowModelTemperature=settings.MAIN_WORKFLOW_TEMPERATURE,
+            errorCorrectionModel=settings.ERROR_CORRECTION_MODEL,
+            errorCorrectionModelTemperature=settings.ERROR_CORRECTION_TEMPERATURE,
+            projectApiKey=settings.PROJECT_API_KEY,
         )
         result = await research_agent.tool_discovery_workflow.tool_discovery_workflow_run(request.query)
         
